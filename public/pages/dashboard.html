@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>لوحة التحكم — TERBO API</title>
+<meta name="theme-color" content="#06021a"><link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Rajdhani:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/css/app.css"><script src="/assets/js/app.js"></script>
+</head>
+<body>
+<div id="hdr"></div>
+<main class="container page">
+  <div class="page-head">
+    <span class="status-pill"><span class="dot"></span> متصل</span><div class="grow"></div>
+    <div style="text-align:end"><h1 id="hello">لوحة التحكم</h1><p>مرحباً بك مجدداً! استمتع بتجربتك معنا</p></div>
+    <div class="ico-box sm">__ICON__</div>
+  </div>
+  <div id="root"><div class="skeleton" style="height:120px;margin-bottom:16px"></div><div class="skeleton" style="height:300px"></div></div>
+</main>
+<div id="ftr"></div>
+<script>
+T.ready(async () => {
+  await T.requireUser();
+  T.$('.ico-box.sm').innerHTML = T.icon('gauge');
+  const d = await T.acc('/dashboard');
+  T.$('#hello').textContent = `لوحة التحكم — ${d.user.username}`;
+  const s = d.stats, p = d.plan;
+  const used = p.dailyLimit ? Math.min(100, Math.round((s.usedToday / p.dailyLimit) * 100)) : 0;
+  const keyRows = d.keys.filter((k) => k.active).slice(0, 4).map((k) => `<div class="key-row"><span class="nm">${T.esc(k.name)}</span><code>${T.esc(k.hint)}</code><span class="badge">${T.num(k.requests)}</span></div>`).join('')
+    || `<div class="empty">${T.icon('key')}لا توجد مفاتيح بعد.</div>`;
+  const reqRows = d.requests.slice(0, 6).map((r) => `<tr><td>${T.time(r.createdAt)}</td><td><span class="path">${T.esc(String(r.path).split('?')[0])}</span></td><td><span class="badge ${r.statusCode < 400 ? 'ok' : 'err'}">${r.statusCode < 400 ? 'ناجح' : 'فشل ' + r.statusCode}</span></td></tr>`).join('')
+    || `<tr><td colspan="3"><div class="empty" style="padding:18px">لا توجد طلبات بعد. جرّب خدمة من <a href="/categories" style="color:var(--p4)">الأقسام</a>.</div></td></tr>`;
+  T.$('#root').innerHTML = `
+    <div class="dash-top">
+      <div class="plan-card"><div class="crown">${T.icon('crown')}</div><div class="grow"><small>الخطة الحالية</small><h3>${T.esc(p.name)}</h3>
+        ${p.dailyLimit ? `<div class="progress" title="${used}%"><i style="width:${used}%"></i></div><small>استهلكت ${T.num(s.usedToday)} من ${T.num(p.dailyLimit)} اليوم</small>` : '<small>استهلاك غير محدود</small>'}</div>
+        <a class="btn btn-primary btn-sm" href="/support?subject=${encodeURIComponent('طلب ترقية الخطة')}">ترقية الخطة</a></div>
+      <div class="kpis" style="margin:0">
+        <div class="card kpi">${T.icon('bolt')}<b>${s.remaining === null ? '∞' : T.num(s.remaining)}</b><span>طلب متبقي اليوم</span></div>
+        <div class="card kpi">${T.icon('chart')}<b>${T.compact(s.requests)}</b><span>إجمالي الطلبات</span></div>
+        <div class="card kpi">${T.icon('key')}<b>${s.keys}</b><span>مفتاح API فعّال</span></div>
+      </div>
+    </div>
+    <div class="two-col">
+      <div class="card"><div class="card-title">${T.icon('activity')} إحصائيات آخر 7 أيام</div>${T.lineChart(d.days.map((x) => T.dayName(x.date)), d.days.map((x) => x.count))}</div>
+      <div class="card"><div class="card-title">${T.icon('key')} مفاتيح API الخاصة بك</div>${keyRows}
+        <a class="btn btn-ghost btn-block" href="/keys" style="margin-top:6px">${T.icon('plus')} إنشاء / إدارة المفاتيح</a></div>
+    </div>
+    <div class="card"><div class="card-title">${T.icon('clock')} آخر الطلبات <span class="tag">بمفاتيحك فقط</span></div>
+      <div class="table-wrap"><table class="tbl"><thead><tr><th>التوقيت</th><th>API</th><th>الحالة</th></tr></thead><tbody>${reqRows}</tbody></table></div></div>`;
+});
+</script>
+</body>
+</html>

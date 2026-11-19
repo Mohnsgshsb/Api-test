@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>القسم — TERBO API</title>
+<meta name="theme-color" content="#06021a"><link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Rajdhani:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/css/app.css"><script src="/assets/js/app.js"></script>
+</head>
+<body>
+<div id="hdr"></div>
+<main class="container page">
+  <nav class="breadcrumb" id="crumb"></nav>
+  <div class="card glow cat-hero" id="hero"><div class="skeleton" style="height:58px;width:100%"></div></div>
+  <div class="cat-grid-2" id="body"></div>
+</main>
+<div id="ftr"></div>
+<script>
+const LABELS = { url: 'الرابط', link: 'الرابط', q: 'كلمة البحث', query: 'كلمة البحث', text: 'النص', prompt: 'الوصف (Prompt)', question: 'السؤال', title: 'العنوان', city: 'المدينة', media: 'رابط الملف', imageUrl: 'رابط الصورة', voice: 'الصوت', username: 'اسم المستخدم', avatar: 'رابط الصورة الشخصية', channel: 'القناة' };
+T.ready(async () => {
+  const parts = location.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+  const [cats, st, cfg] = await Promise.all([T.catalog(), fetch('/api/public/stats', { cache: 'no-store' }).then((r) => r.json()).catch(() => null), T.config()]);
+  const cat = cats.find((c) => c.slug === parts[1]);
+  if (!cat) { T.$('#hero').innerHTML = '<div class="empty" style="width:100%">القسم غير موجود. <a href="/categories" style="color:var(--p4)">العودة للأقسام</a></div>'; return; }
+  document.title = `${cat.title} — TERBO API`;
+  T.$('#crumb').innerHTML = `<a href="/">الرئيسية</a>${T.icon('chevL')}<a href="/categories">الأقسام</a>${T.icon('chevL')}<span class="ltr">${T.esc(cat.name)}</span>`;
+  T.$('#hero').innerHTML = `<div class="ico-box">${T.icon(cat.icon)}</div><div class="grow"><h1>API ${T.esc(cat.name)}</h1><p>${T.esc(cat.description || cat.title)}</p></div><span class="badge ok"><span class="dot"></span> متاح</span>`;
+
+  const plan = T.plan || (cfg.plans && cfg.plans[cfg.defaultPlan]) || null;
+  const limitTxt = plan ? (plan.dailyLimit === 0 ? 'غير محدود' : `${T.num(plan.dailyLimit)} طلب/يوم`) : '—';
+  const speed = !st || !st.avgMs ? '—' : st.avgMs < 500 ? 'عالية جداً' : st.avgMs < 1500 ? 'جيدة' : 'متوسطة';
+
+  let idx = Math.max(0, cat.items.findIndex((i) => i.slug === parts[2]));
+  let method = 'GET';
+  const keyLS = (() => { try { return localStorage.getItem('terbo_test_key') || ''; } catch (e) { return ''; } })();
+
+  T.$('#body').innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:18px;min-width:0">
+      <div class="card"><div class="card-title">${T.icon('info')} معلومات API</div>
+        <div class="info-row"><span>الحالة</span><b style="color:var(--green)"><span class="dot"></span> متاح الآن</b></div>
+        <div class="info-row"><span>السرعة</span><b>${T.icon('bolt')} ${speed}</b></div>
+        <div class="info-row"><span>الحد الأقصى</span><b>${T.icon('chart')} ${limitTxt}</b></div>
+        <div class="info-row"><span>عدد الخدمات</span><b>${cat.items.length}</b></div>
+      </div>
+      <div class="card"><div class="card-title">${T.icon('list')} قنوات النهاية المتاحة</div><div class="ep-list" id="eps"></div></div>
+    </div>
+    <div class="card glow" style="min-width:0"><div class="card-title">${T.icon('bolt')} مجرّب API <span class="tag ltr" id="epName"></span></div>
+      <p class="muted" id="epDesc" style="margin:-6px 0 14px;font-size:13.5px"></p>
+      <div class="tabs" id="methods"></div>
+      <div id="params"></div>
+      <div class="field" id="keyField" style="display:none"><label>مفتاح API <span class="muted" style="font-weight:400">(مطلوب)</span></label><input class="input ltr" id="key" placeholder="tb_live_..." value="${T.esc(keyLS)}" autocomplete="off"></div>
+      <div class="url-bar"><input class="input" id="urlPrev" readonly><button class="btn btn-ghost btn-sm" id="copyUrl" title="نسخ الرابط">${T.icon('copy')}</button><button class="btn btn-ghost btn-sm" id="copyCurl" title="نسخ cURL">${T.icon('terminal')}</button></div>
+      <button class="btn btn-primary btn-block" id="send">${T.icon('send')} إرسال الطلب</button>
+      <div class="label" style="margin:18px 0 8px">الاستجابة:</div>
+      <div class="resp-meta" id="meta"></div>
+      <div style="position:relative"><button class="copy-btn" id="copyResp">${T.icon('copy')} نسخ</button><div class="codebox wrapit" id="resp" style="padding-top:38px"><span class="c">// ستظهر النتيجة هنا بعد إرسال الطلب</span></div></div>
+      <div id="media"></div>
+    </div>`;
+
+  const items = cat.items;
+  const paramsOf = (it) => { const q = String(it.path).split('?')[1] || ''; return q.split('&').filter(Boolean).map((p) => { const [k, ...v] = p.split('='); return { key: decodeURIComponent(k), val: decodeURIComponent(v.join('=') || '') }; }); };
+
+  const eps = T.$('#eps');
+  eps.innerHTML = items.map((it, n) => `<button class="ep" data-n="${n}"><span class="badge ${it.method === 'POST' ? 'post' : 'get'}">${T.esc(it.method)}</span><span class="name">${T.esc(it.name)}</span>${T.icon('chevL')}</button>`).join('');
+  eps.addEventListener('click', (e) => { const b = e.target.closest('.ep'); if (b) select(+b.dataset.n, true); });
+
+  function buildUrl() {
+    const it = items[idx]; const base = String(it.path).split('?')[0]; const qs = new URLSearchParams();
+    T.$$('#params [data-key]').forEach((i) => { if (i.value.trim()) qs.set(i.dataset.key, i.value.trim()); });
+    return { base, qs, url: location.origin + base + (method === 'GET' && qs.toString() ? '?' + qs : '') };
+  }
+  const keyVal = () => (items[idx] && items[idx].needsKey ? T.$('#key').value.trim() : '');
+  function refreshUrl() { T.$('#urlPrev').value = buildUrl().url; }
+
+  function select(n, push) {
+    idx = n; const it = items[n];
+    T.$$('.ep', eps).forEach((b, i) => b.classList.toggle('active', i === n));
+    T.$('#epName').textContent = it.name; T.$('#epDesc').textContent = it.desc || '';
+    const supported = it.methods && it.methods.length ? it.methods : [it.method];
+    method = supported.includes(method) ? method : supported[0];
+    T.$('#methods').innerHTML = ['GET', 'POST'].map((m) => `<button data-m="${m}" class="${m === method ? 'active' : ''}" ${supported.includes(m) ? '' : 'disabled title="غير مدعوم لهذه الخدمة"'}>${m}</button>`).join('');
+    const ps = paramsOf(it);
+    T.$('#params').innerHTML = ps.length ? ps.map((p) => `<div class="field"><label>${T.esc(LABELS[p.key] || p.key)} <span class="muted ltr" style="font-weight:400">(${T.esc(p.key)})</span></label><input class="input" data-key="${T.esc(p.key)}" value="${T.esc(p.val)}" placeholder="${T.esc(LABELS[p.key] || p.key)}" autocomplete="off"></div>`).join('') : '<p class="muted" style="font-size:13.5px;margin:0 0 14px">لا تحتاج هذه الخدمة إلى معاملات.</p>';
+    T.$('#keyField').style.display = it.needsKey ? '' : 'none';
+    refreshUrl();
+    T.$('#resp').innerHTML = '<span class="c">// ستظهر النتيجة هنا بعد إرسال الطلب</span>'; T.$('#meta').innerHTML = ''; T.$('#media').innerHTML = '';
+    if (push) history.replaceState(null, '', `/category/${encodeURIComponent(cat.slug)}/${encodeURIComponent(it.slug)}`);
+  }
+  T.$('#methods').addEventListener('click', (e) => { const b = e.target.closest('button[data-m]'); if (!b || b.disabled) return; method = b.dataset.m; T.$$('#methods button').forEach((x) => x.classList.toggle('active', x === b)); refreshUrl(); });
+  T.$('#params').addEventListener('input', refreshUrl);
+  T.$('#key').addEventListener('change', (e) => { try { localStorage.setItem('terbo_test_key', e.target.value.trim()); } catch (x) { /* ignore */ } });
+  T.$('#copyUrl').onclick = () => T.copy(buildUrl().url, 'تم نسخ الرابط');
+  T.$('#copyCurl').onclick = () => {
+    const { base, qs, url } = buildUrl(); const k = keyVal();
+    let c = `curl -X ${method} "${url}"`; if (k) c += ` \\\n  -H "x-api-key: ${k}"`;
+    if (method !== 'GET') c = `curl -X ${method} "${location.origin + base}" \\\n  -H "Content-Type: application/json"${k ? ` \\\n  -H "x-api-key: ${k}"` : ''} \\\n  -d '${JSON.stringify(Object.fromEntries(qs))}'`;
+    T.copy(c, 'تم نسخ أمر cURL');
+  };
+  T.$('#copyResp').onclick = () => T.copy(T.$('#resp').innerText, 'تم نسخ النتيجة');
+
+  T.$('#send').onclick = async (e) => {
+    const btn = e.currentTarget; const { base, qs, url } = buildUrl(); const k = keyVal();
+    const headers = {}; if (k) headers['x-api-key'] = k;
+    const opts = { method, headers };
+    if (method !== 'GET') { headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(Object.fromEntries(qs)); }
+    const t0 = performance.now();
+    await T.spinBtn(btn, async () => {
+      T.$('#resp').innerHTML = '<span class="c">// جاري الإرسال...</span>'; T.$('#media').innerHTML = '';
+      try {
+        const r = await fetch(method === 'GET' ? url : location.origin + base, opts);
+        const ms = Math.round(performance.now() - t0); const ct = r.headers.get('content-type') || '';
+        T.$('#meta').innerHTML = `<span class="badge ${r.ok ? 'ok' : 'err'}">${r.status} ${T.esc(r.statusText || '')}</span><span class="badge">${T.icon('clock')} ${ms}ms</span>`;
+        const rem = r.headers.get('x-daily-remaining'); if (rem) T.$('#meta').innerHTML += `<span class="badge">المتبقي اليوم: ${T.esc(rem)}</span>`;
+        if (/^(image|audio|video)\//.test(ct)) {
+          const blob = await r.blob(); const u = URL.createObjectURL(blob); const tag = ct.startsWith('image') ? `<img src="${u}" alt="">` : ct.startsWith('audio') ? `<audio controls src="${u}"></audio>` : `<video controls src="${u}"></video>`;
+          T.$('#resp').textContent = `[${ct}] ${(blob.size / 1024).toFixed(1)} KB`; T.$('#media').innerHTML = `<div class="media-preview">${tag}</div>`; return;
+        }
+        const text = await r.text(); let shown = text, json = null;
+        try { json = JSON.parse(text); shown = JSON.stringify(json, null, 2); } catch (x) { /* not json */ }
+        if (shown.length > 200000) shown = shown.slice(0, 200000) + '\n… (تم اقتطاع النتيجة)';
+        T.$('#resp').innerHTML = json ? T.highlight(shown) : T.esc(shown);
+        if (json) {
+          const urls = []; (function walk(o) { if (typeof o === 'string') urls.push(o); else if (o && typeof o === 'object') Object.values(o).forEach(walk); })(json);
+          const img = urls.find((s) => /^https?:\/\/\S+\.(png|jpe?g|gif|webp)(\?\S*)?$/i.test(s)), vid = urls.find((s) => /^https?:\/\/\S+\.(mp4|webm)(\?\S*)?$/i.test(s)), aud = urls.find((s) => /^https?:\/\/\S+\.(mp3|m4a|ogg|wav)(\?\S*)?$/i.test(s));
+          const tag = img ? `<img src="${T.esc(img)}" alt="" referrerpolicy="no-referrer">` : vid ? `<video controls src="${T.esc(vid)}"></video>` : aud ? `<audio controls src="${T.esc(aud)}"></audio>` : '';
+          if (tag) T.$('#media').innerHTML = `<div class="media-preview">${tag}</div>`;
+        }
+      } catch (err) { T.$('#meta').innerHTML = '<span class="badge err">فشل الاتصال</span>'; T.$('#resp').textContent = err.message; }
+    });
+  };
+  select(idx, false);
+});
+</script>
+</body>
+</html>

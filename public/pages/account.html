@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>حسابي — TERBO API</title>
+<meta name="theme-color" content="#06021a"><link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Rajdhani:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/css/app.css"><script src="/assets/js/app.js"></script>
+</head>
+<body>
+<div id="hdr"></div>
+<main class="container page" style="max-width:640px">
+  <div class="card glow">
+    <div class="page-head" style="margin-bottom:18px"><div class="ico-box sm" id="ico"></div><div><h1 style="font-size:26px">حسابي</h1><p>إدارة بيانات حسابك وإعداداته</p></div></div>
+    <div class="center" style="margin-bottom:22px"><div class="avatar lg" id="av" style="margin:0 auto 10px"></div><span class="badge" id="planBadge"></span></div>
+    <div id="msg"></div>
+    <form id="f" autocomplete="off">
+      <div class="field"><label>اسم المستخدم</label><input class="input" id="username" maxlength="24"></div>
+      <div class="field"><label>البريد الإلكتروني</label><input class="input ltr" id="email" type="email"></div>
+      <div class="field"><label>كلمة المرور الجديدة</label><input class="input" id="pw" type="password" autocomplete="new-password" placeholder="اتركها فارغة إذا لم ترد تغييرها"><span class="hint">8 أحرف على الأقل</span></div>
+      <div class="field hidden" id="curWrap"><label>كلمة المرور الحالية</label><input class="input" id="cur" type="password" autocomplete="current-password" placeholder="مطلوبة لتأكيد تغيير كلمة المرور"></div>
+      <button class="btn btn-primary btn-block" id="save"></button>
+    </form>
+    <hr style="border:0;border-top:1px solid var(--line);margin:22px 0">
+    <div class="row between wrap"><div><b>الجلسات</b><div class="muted" style="font-size:13px">تسجيل الخروج من كل الأجهزة (يُلغي كل الجلسات النشطة)</div></div><button class="btn btn-danger btn-sm" id="all"></button></div>
+  </div>
+</main>
+<div id="ftr"></div>
+<script>
+T.ready(async () => {
+  const u = await T.requireUser();
+  T.$('#ico').innerHTML = T.icon('user'); T.$('#save').innerHTML = T.icon('save') + ' حفظ التغييرات'; T.$('#all').innerHTML = T.icon('logout') + ' خروج من كل الأجهزة';
+  const fill = (x) => { T.$('#av').textContent = x.username[0].toUpperCase(); T.$('#username').value = x.username; T.$('#email').value = x.email; };
+  fill(u); T.$('#planBadge').innerHTML = T.icon('crown') + ' ' + T.esc(T.plan.name);
+  T.$('#pw').addEventListener('input', (e) => T.$('#curWrap').classList.toggle('hidden', !e.target.value));
+  const show = (m, ok) => { T.$('#msg').innerHTML = m ? `<div class="${ok ? 'form-ok' : 'form-error'}">${T.esc(m)}</div>` : ''; };
+  T.$('#f').onsubmit = async (e) => {
+    e.preventDefault(); show('');
+    const body = { username: T.$('#username').value.trim(), email: T.$('#email').value.trim() };
+    if (T.$('#pw').value) { body.password = T.$('#pw').value; body.currentPassword = T.$('#cur').value; }
+    try {
+      const d = await T.spinBtn(T.$('#save'), () => T.acc('/auth/profile', { method: 'PATCH', body }));
+      T.setAuth(d.token || T.token, d.user); fill(d.user); T.$('#pw').value = ''; T.$('#cur').value = ''; T.$('#curWrap').classList.add('hidden');
+      show('تم حفظ التغييرات بنجاح', true);
+    } catch (err) { show(err.message); }
+  };
+  T.$('#all').onclick = async () => { if (await T.confirm('سيتم تسجيل خروجك من جميع الأجهزة. متابعة؟', { ok: 'متابعة' })) { await fetch('/api/account/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ all: true }) }); T.clearAuth(); location.href = '/login'; } };
+});
+</script>
+</body>
+</html>

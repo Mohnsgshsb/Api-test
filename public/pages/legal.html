@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>الشروط والخصوصية — TERBO API</title>
+<meta name="theme-color" content="#06021a"><link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Rajdhani:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/css/app.css"><script src="/assets/js/app.js"></script>
+</head>
+<body>
+<div id="hdr"></div>
+<main class="container page" style="max-width:820px"><article class="card prose" id="doc"></article></main>
+<div id="ftr"></div>
+<script>
+T.ready(async () => {
+  const cfg = await T.config(); const priv = location.pathname.startsWith('/privacy');
+  const mail = cfg.contact && cfg.contact.email ? T.esc(cfg.contact.email) : '';
+  document.title = (priv ? 'سياسة الخصوصية' : 'الشروط والأحكام') + ' — ' + (cfg.siteName || 'TERBO API');
+  T.$('#doc').innerHTML = priv ? `<h2>${T.icon('shield')} سياسة الخصوصية</h2>
+    <p>نجمع الحد الأدنى من البيانات اللازمة لتشغيل الخدمة: اسم المستخدم والبريد الإلكتروني وكلمة المرور (مشفّرة بـ scrypt ولا يمكن استرجاعها)، بالإضافة إلى سجلات الطلبات (المسار والوقت وعنوان IP) لأغراض الأمان وحدود الاستخدام.</p>
+    <ul><li>لا نبيع بياناتك ولا نشاركها مع أطراف خارجية.</li><li>تُحفظ مفاتيح API كبصمة مشفّرة فقط ولا يمكن عرضها بعد إنشائها.</li><li>يمكنك طلب حذف حسابك وبياناتك عبر الدعم الفني.</li></ul>${mail ? `<p>للاستفسار: <b class="ltr">${mail}</b></p>` : ''}`
+  : `<h2>${T.icon('book')} الشروط والأحكام</h2>
+    <p>باستخدامك للمنصة فإنك توافق على الشروط التالية:</p>
+    <ul><li>الالتزام بحدود الاستخدام الخاصة بخطتك وعدم محاولة تجاوزها.</li><li>عدم استخدام الخدمات في أي نشاط مخالف للقانون أو ينتهك حقوق الآخرين.</li><li>أنت مسؤول عن سرية مفتاح API الخاص بك وعن أي استخدام يتم به.</li><li>يحق للإدارة إيقاف أي حساب أو مفتاح يسيء الاستخدام دون إشعار مسبق.</li><li>الخدمات تُقدَّم كما هي، وقد تتوقف مؤقتاً للصيانة أو لتغيّر المصادر الخارجية.</li></ul>${mail ? `<p>للاستفسار: <b class="ltr">${mail}</b></p>` : ''}`;
+});
+</script>
+</body></html>

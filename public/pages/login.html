@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>تسجيل الدخول — TERBO API</title>
+<meta name="theme-color" content="#06021a"><link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Rajdhani:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/css/app.css"><script src="/assets/js/app.js"></script>
+</head>
+<body>
+<div id="hdr"></div>
+<main class="auth-wrap container">
+  <div class="card glow auth-card">
+    <div class="auth-logo" id="alogo"></div>
+    <h1 id="title"></h1>
+    <p class="sub" id="sub"></p>
+    <div class="auth-tabs" id="tabs"><a href="/login" data-m="login">تسجيل الدخول</a><a href="/register" data-m="register">إنشاء حساب</a></div>
+    <div id="msg"></div>
+    <form id="form" novalidate autocomplete="on">
+      <div class="field" id="fUser"><label id="lUser" for="identity"></label><input class="input" id="identity" name="username" autocomplete="username" required></div>
+      <div class="field hidden" id="fEmail"><label for="email">البريد الإلكتروني</label><input class="input ltr" id="email" type="email" autocomplete="email" placeholder="name@example.com"></div>
+      <div class="field"><label for="password">كلمة المرور</label>
+        <div class="input-wrap"><input class="input" id="password" type="password" autocomplete="current-password" placeholder="أدخل كلمة المرور" required><button type="button" class="toggle-eye" id="eye" aria-label="إظهار كلمة المرور"></button></div>
+      </div>
+      <div class="strength hidden" id="strength"><i></i></div>
+      <div class="field hidden" id="fConfirm"><label for="confirm">تأكيد كلمة المرور</label><input class="input" id="confirm" type="password" autocomplete="new-password" placeholder="أعد كتابة كلمة المرور"></div>
+      <div class="row between" style="margin-bottom:16px"><label class="check" id="rememberWrap"><input type="checkbox" id="remember" checked> تذكرني</label><span></span></div>
+      <button class="btn btn-primary btn-block" id="submit" type="submit"></button>
+    </form>
+    <div class="auth-foot" id="foot"></div>
+  </div>
+</main>
+<script>
+T.ready(async () => {
+  const path = location.pathname.replace(/\/+$/, '');
+  const mode = path === '/register' ? 'register' : path === '/admin/login' ? 'admin' : 'login';
+  const cfg = await T.config();
+  const next = T.qs('next');
+  T.$('#alogo').innerHTML = T.logoHtml;
+  T.$('#eye').innerHTML = T.icon('eye');
+  T.$('#title').textContent = mode === 'register' ? 'إنشاء حساب جديد' : mode === 'admin' ? 'دخول لوحة الإدارة' : 'تسجيل الدخول';
+  T.$('#sub').textContent = mode === 'register' ? 'انضم إلى المنصة واحصل على مفتاح API مجاناً' : mode === 'admin' ? 'للمسؤولين فقط' : 'مرحباً بك مجدداً! قم بتسجيل الدخول للمتابعة';
+  document.title = `${T.$('#title').textContent} — TERBO API`;
+  T.$('#lUser').textContent = mode === 'register' ? 'اسم المستخدم' : 'اسم المستخدم أو البريد الإلكتروني';
+  T.$('#identity').placeholder = mode === 'register' ? 'مثال: mohnd_dev' : 'أدخل اسم المستخدم أو البريد';
+  T.$('#submit').innerHTML = (mode === 'register' ? T.icon('rocket') + ' إنشاء الحساب' : T.icon('lock') + ' تسجيل الدخول');
+  if (mode === 'admin') T.$('#tabs').classList.add('hidden');
+  T.$$('#tabs a').forEach((a) => { a.classList.toggle('active', a.dataset.m === mode); if (next) a.href += '?next=' + encodeURIComponent(next); });
+  if (mode === 'register') {
+    T.$('#fEmail').classList.remove('hidden'); T.$('#fConfirm').classList.remove('hidden'); T.$('#strength').classList.remove('hidden');
+    T.$('#rememberWrap').classList.add('hidden'); T.$('#password').autocomplete = 'new-password';
+    if (cfg.registrationEnabled === false) { T.$('#msg').innerHTML = '<div class="form-error">التسجيل مغلق حالياً من قِبل الإدارة.</div>'; T.$$('#form input,#form button').forEach((e) => { e.disabled = true; }); }
+  }
+  T.$('#foot').innerHTML = mode === 'register' ? 'لديك حساب بالفعل؟ <a href="/login">سجّل دخولك</a>' : mode === 'admin' ? '<a href="/login">العودة لتسجيل الدخول العادي</a>' : 'ليس لديك حساب؟ <a href="/register">أنشئ حساباً الآن</a>';
+
+  T.$('#eye').onclick = () => { const p = T.$('#password'); const show = p.type === 'password'; p.type = show ? 'text' : 'password'; T.$('#eye').innerHTML = T.icon(show ? 'eyeOff' : 'eye'); };
+  T.$('#password').addEventListener('input', (e) => {
+    const v = e.target.value; let s = 0; if (v.length >= 8) s++; if (/[A-Za-z]/.test(v) && /\d/.test(v)) s++; if (/[^A-Za-z0-9]/.test(v) || v.length >= 12) s++;
+    const bar = T.$('#strength i'); bar.style.width = (v ? 25 + s * 25 : 0) + '%'; bar.style.background = ['#fb7185', '#fbbf24', '#a3e635', '#34d399'][s];
+  });
+  const show = (m) => { T.$('#msg').innerHTML = m ? `<div class="form-error">${T.esc(m)}</div>` : ''; };
+
+  T.$('#form').addEventListener('submit', async (e) => {
+    e.preventDefault(); show('');
+    const identity = T.$('#identity').value.trim(), password = T.$('#password').value;
+    if (!identity || !password) return show('املأ جميع الحقول المطلوبة');
+    let url, body;
+    if (mode === 'register') {
+      const email = T.$('#email').value.trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return show('أدخل بريداً إلكترونياً صحيحاً');
+      if (password.length < 8) return show('كلمة المرور يجب ألا تقل عن 8 أحرف');
+      if (password !== T.$('#confirm').value) return show('كلمتا المرور غير متطابقتين');
+      url = '/auth/register'; body = { username: identity, email, password, confirm: T.$('#confirm').value };
+    } else { url = mode === 'admin' ? '/admin/auth/login' : '/auth/login'; body = { identity, password, remember: T.$('#remember').checked }; }
+    try {
+      const d = await T.spinBtn(T.$('#submit'), () => T.acc(url, { method: 'POST', body, auth: false }));
+      T.setAuth(d.token, d.user);
+      T.toast(d.message || 'تم بنجاح');
+      location.href = T.safeNext(next, d.user.role === 'admin' ? '/admin' : '/dashboard');
+    } catch (err) { show(err.message); }
+  });
+});
+</script>
+</body>
+</html>

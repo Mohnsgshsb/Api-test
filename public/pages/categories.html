@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>الأقسام — TERBO API</title>
+<meta name="theme-color" content="#06021a"><link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Rajdhani:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/css/app.css"><script src="/assets/js/app.js"></script>
+</head>
+<body>
+<div id="hdr"></div>
+<main class="container page">
+  <div class="page-head">
+    <div class="ico-box" id="ico"></div>
+    <div class="grow"><h1>أقسام الـ API</h1><p>اختر القسم الذي تريده وجرّب الخدمات مباشرة</p></div>
+    <div style="min-width:260px;flex:1;max-width:360px"><input class="input" id="q" type="search" placeholder="ابحث عن قسم أو خدمة..." autocomplete="off"></div>
+  </div>
+  <section class="cat-grid" id="grid"></section>
+  <div id="results" class="card hidden" style="margin-top:18px"></div>
+</main>
+<div id="ftr"></div>
+<script>
+T.ready(async () => {
+  T.$('#ico').innerHTML = T.icon('layers');
+  const cats = await T.catalog();
+  const grid = T.$('#grid'), res = T.$('#results');
+  const draw = (list) => { grid.innerHTML = list.length ? list.map((c) => `<a class="cat-tile" href="/category/${encodeURIComponent(c.slug)}"><div class="ico">${T.icon(c.icon)}</div><h3>${T.esc(c.title)}</h3><small>${c.items.length} خدمة API</small></a>`).join('') : '<div class="empty card" style="grid-column:1/-1">لا توجد نتائج مطابقة.</div>'; };
+  draw(cats);
+  T.$('#q').addEventListener('input', T.debounce((e) => {
+    const q = e.target.value.trim().toLowerCase();
+    if (!q) { draw(cats); res.classList.add('hidden'); return; }
+    draw(cats.filter((c) => `${c.name} ${c.title}`.toLowerCase().includes(q)));
+    const hits = [];
+    cats.forEach((c) => c.items.forEach((i) => { if (`${i.name} ${i.desc} ${i.path}`.toLowerCase().includes(q)) hits.push({ c, i }); }));
+    res.classList.toggle('hidden', !hits.length);
+    res.innerHTML = `<div class="card-title">${T.icon('search')} الخدمات (${hits.length})</div><div class="ep-list" style="max-height:none">${hits.slice(0, 40).map(({ c, i }) => `<a class="ep" href="/category/${encodeURIComponent(c.slug)}/${encodeURIComponent(i.slug)}"><span class="badge get">${T.esc(i.method)}</span><span class="name">${T.esc(i.name)}</span><span class="muted" style="font-size:12px">${T.esc(c.title)}</span>${T.icon('chevL')}</a>`).join('')}</div>`;
+  }, 200));
+});
+</script>
+</body>
+</html>

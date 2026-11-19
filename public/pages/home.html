@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TERBO API — منصة API متكاملة وسريعة</title>
+<meta name="description" content="منصة TERBO API: واجهات برمجية للتحميل والذكاء الاصطناعي والبحث والأدوات بأداء عالٍ وسهولة في الدمج.">
+<meta name="theme-color" content="#06021a"><link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Rajdhani:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/css/app.css"><script src="/assets/js/app.js"></script>
+</head>
+<body>
+<div id="hdr"></div>
+<main class="container">
+  <section class="hero">
+    <div>
+      <h1>مرحباً بك في <span class="grad">TERBO API</span></h1>
+      <p id="tagline">منصة API متكاملة وسريعة تلبي جميع احتياجاتك التقنية</p>
+      <div class="hero-btns">
+        <a href="/categories" class="btn btn-primary" id="ctaMain"></a>
+        <a href="/docs" class="btn btn-ghost" id="ctaDocs"></a>
+      </div>
+    </div>
+    <div class="hero-art"><img src="/assets/img/hero.svg" alt="TERBO API" width="600" height="460" fetchpriority="high"></div>
+  </section>
+
+  <section class="stats card" id="stats" aria-label="إحصائيات المنصة" style="padding:6px;background:var(--panel)">
+    <div class="stat"><div class="skeleton" style="width:80px;height:46px"></div></div>
+    <div class="stat"><div class="skeleton" style="width:80px;height:46px"></div></div>
+    <div class="stat"><div class="skeleton" style="width:80px;height:46px"></div></div>
+    <div class="stat"><div class="skeleton" style="width:80px;height:46px"></div></div>
+  </section>
+
+  <h2 class="section-title" id="cats">أقسام الـ API</h2>
+  <section class="cat-grid" id="catGrid">
+    <div class="skeleton" style="height:150px"></div><div class="skeleton" style="height:150px"></div><div class="skeleton" style="height:150px"></div><div class="skeleton" style="height:150px"></div>
+  </section>
+
+  <section class="cta-band hidden" id="guestCta">
+    <div><h3>جاهز تبدأ؟</h3><p>أنشئ حسابك مجاناً واحصل على مفتاح API خلال ثوانٍ.</p></div>
+    <a href="/register" class="btn btn-primary" id="ctaReg"></a>
+  </section>
+  <div style="height:50px"></div>
+</main>
+<div id="ftr"></div>
+<script>
+T.ready(async () => {
+  T.$('#ctaMain').innerHTML = T.icon('rocket') + ' استكشاف الأقسام';
+  T.$('#ctaDocs').innerHTML = T.icon('book') + ' قراءة الوثائق';
+  T.$('#ctaReg').innerHTML = T.icon('rocket') + ' إنشاء حساب مجاني';
+  if (!T.user) T.$('#guestCta').classList.remove('hidden');
+  const cfg = await T.config();
+  if (cfg.tagline) T.$('#tagline').textContent = cfg.tagline;
+
+  const [cats, st] = await Promise.all([T.catalog(), fetch('/api/public/stats', { cache: 'no-store' }).then((r) => r.json()).catch(() => null)]);
+  const tiles = st ? [
+    ['cloudDown', T.num(st.apiCount), 'API متاح'],
+    ['bolt', st.uptime, 'مدة تشغيل الخادم'],
+    ['users', T.num(st.users), 'مطور مسجل'],
+    ['rocket', T.num(st.successfulRequests), 'طلب ناجح'],
+  ] : [['cloudDown', cats.reduce((n, c) => n + c.items.length, 0), 'API متاح'], ['bolt', '—', 'مدة التشغيل'], ['users', '—', 'مطور مسجل'], ['rocket', '—', 'طلب ناجح']];
+  T.$('#stats').innerHTML = tiles.map(([ic, v, l]) => `<div class="stat">${T.icon(ic)}<div class="val">${T.esc(v)}</div><div class="lbl">${l}</div></div>`).join('');
+
+  T.$('#catGrid').innerHTML = cats.length ? cats.map((c) => `<a class="cat-tile" href="/category/${encodeURIComponent(c.slug)}">
+      <div class="ico">${T.icon(c.icon)}</div><h3>${T.esc(c.title)}</h3><small>${c.items.length} خدمة API</small></a>`).join('')
+    : '<div class="empty card" style="grid-column:1/-1">لا توجد أقسام متاحة حالياً.</div>';
+});
+</script>
+</body>
+</html>

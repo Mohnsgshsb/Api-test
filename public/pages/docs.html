@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>الوثائق الرسمية — TERBO API</title>
+<meta name="theme-color" content="#06021a"><link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Rajdhani:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/css/app.css"><script src="/assets/js/app.js"></script>
+</head>
+<body>
+<div id="hdr"></div>
+<main class="container page">
+  <div class="side-layout">
+    <aside class="card side-nav" id="side"></aside>
+    <section class="card prose" id="content" style="min-height:420px"></section>
+  </div>
+</main>
+<div id="ftr"></div>
+<script>
+const SECTIONS = [
+  ['', 'مقدمة عامة', 'home'], ['usage', 'طريقة الاستخدام', 'play'], ['examples', 'أمثلة على الاستخدام', 'code'],
+  ['auth', 'المفاتيح والمصادقة', 'key'], ['limits', 'الحدود والخطط', 'chart'], ['errors', 'الأخطاء الشائعة', 'alert'],
+];
+const ERRORS = [
+  [400, 'معاملات ناقصة أو غير صحيحة', 'تأكد من إرسال كل المعاملات المطلوبة للخدمة (مثل url أو text).'],
+  [401, 'مفتاح API غير صالح أو مطلوب', 'أرسل مفتاحاً صحيحاً في الهيدر x-api-key، أو أنشئ مفتاحاً جديداً من لوحة التحكم.'],
+  [403, 'الحساب موقوف أو الصلاحية غير كافية', 'تواصل مع الدعم الفني إذا كنت تعتقد أن هذا خطأ.'],
+  [404, 'المسار غير موجود', 'راجع اسم الخدمة في صفحة القسم.'],
+  [429, 'تجاوزت الحد المسموح', 'انتظر حتى يتجدد الحد (الهيدر Retry-After) أو استخدم خطة أعلى.'],
+  [500, 'خطأ في الخادم أو في المصدر الخارجي', 'أعد المحاولة بعد قليل، وإن استمر أبلغ الدعم مع الرابط المستخدم.'],
+  [503, 'الخدمة متوقفة أو تحت الصيانة', 'تُعاد الخدمة تلقائياً عند انتهاء الصيانة.'],
+];
+function codeBlock(tabs) {
+  const id = 'cb' + Math.random().toString(36).slice(2, 7);
+  return `<div class="tabs" data-for="${id}">${tabs.map((t, i) => `<button class="${i ? '' : 'active'}" data-i="${i}">${t[0]}</button>`).join('')}</div>
+    <div style="position:relative"><button class="copy-btn" data-copy="${id}">${T.icon('copy')} نسخ</button><div class="codebox" id="${id}" style="padding-top:38px">${T.esc(tabs[0][1])}</div></div>
+    <script type="application/json" id="${id}-d">${JSON.stringify(tabs.map((t) => t[1])).replace(/</g, '\\u003c')}<\/script>`;
+}
+T.ready(async () => {
+  const parts = location.pathname.split('/').filter(Boolean); const sec = parts[1] || '';
+  const cfg = await T.config(); const cats = await T.catalog();
+  const origin = location.origin;
+  const ex = (() => { const c = cats.find((x) => x.items.length) || { items: [] }; return c.items[0] || { name: 'مثال', path: '/api/status' }; })();
+  const exPath = ex.path.replace(/=$/, '=hello');
+  const full = origin + exPath;
+  const sepr = exPath.includes('?') ? '&' : '?';
+
+  T.$('#side').innerHTML = `<div class="row" style="padding:6px 8px 12px"><div class="ico-box sm">${T.icon('book')}</div><div><b>الوثائق الرسمية</b><div class="muted" style="font-size:12px">كل ما تحتاجه للبدء</div></div></div>`
+    + SECTIONS.map(([s, l, ic]) => `<a href="/docs${s ? '/' + s : ''}" class="${s === sec ? 'active' : ''}">${T.icon(ic)} ${l}</a>`).join('')
+    + `<hr><a href="/support">${T.icon('headset')} الدعم الفني</a>` + (T.user ? `<button id="sideOut">${T.icon('logout')} تسجيل الخروج</button>` : `<a href="/login">${T.icon('user')} تسجيل الدخول</a>`);
+  if (T.user) T.$('#sideOut').onclick = () => T.logout('/');
+  const cur = SECTIONS.find((s) => s[0] === sec); document.title = `${cur ? cur[1] : 'الوثائق'} — TERBO API`;
+
+  const curl = `curl "${full}" \\\n  -H "x-api-key: YOUR_API_KEY"`;
+  const js = `const res = await fetch("${full}", {\n  headers: { "x-api-key": "YOUR_API_KEY" }\n});\nconst data = await res.json();\nconsole.log(data);`;
+  const py = `import requests\n\nr = requests.get("${full}", headers={"x-api-key": "YOUR_API_KEY"})\nprint(r.json())`;
+  const node = `const axios = require("axios");\n\nconst { data } = await axios.get("${full}", {\n  headers: { "x-api-key": "YOUR_API_KEY" },\n});\nconsole.log(data);`;
+  const php = `<?php\n$ch = curl_init("${full}");\ncurl_setopt($ch, CURLOPT_HTTPHEADER, ["x-api-key: YOUR_API_KEY"]);\ncurl_setopt($ch, CURLOPT_RETURNTRANSFER, true);\necho curl_exec($ch);`;
+  const langs = [['cURL', curl], ['JavaScript', js], ['Python', py], ['Node.js', node], ['PHP', php]];
+
+  const html = {
+    '': () => `<h2>${T.icon('home')} مقدمة عامة</h2>
+      <p><b>${T.esc(cfg.siteName || 'TERBO API')}</b> منصة واجهات برمجية (REST) تقدّم خدمات التحميل والذكاء الاصطناعي والبحث والأدوات بأداء عالٍ وصيغة JSON موحّدة. كل ما تحتاجه طلب HTTP بسيط.</p>
+      <h3>العنوان الأساسي (Base URL)</h3><div class="codebox">${T.esc(origin)}</div>
+      <h3>مثال سريع</h3>${codeBlock([['cURL', `curl "${full}"`]])}
+      <h3>الاستجابة</h3><div class="codebox">${T.highlight(JSON.stringify({ status: true, creator: 'TERBO API', result: '...' }, null, 2))}</div>
+      <p class="muted" style="margin-top:14px">يمكنك تجربة أي خدمة مباشرة من <a href="/categories" style="color:var(--p4)">صفحة الأقسام</a> قبل دمجها في مشروعك.</p>`,
+    usage: () => `<h2>${T.icon('play')} طريقة الاستخدام</h2>
+      <ol><li><a href="/register" style="color:var(--p4)">أنشئ حساباً</a> مجاناً (أو سجّل دخولك).</li><li>من <a href="/keys" style="color:var(--p4)">مفاتيح API</a> أنشئ مفتاحاً جديداً وانسخه.</li><li>اختر الخدمة من <a href="/categories" style="color:var(--p4)">الأقسام</a> وانسخ مسارها.</li><li>أرسل الطلب مع المفتاح في الهيدر <code class="inline">x-api-key</code>.</li></ol>
+      <p>يمكنك أيضاً تمرير المفتاح كمعامل <code class="inline">?apikey=...</code> عند الضرورة، لكن الهيدر أكثر أماناً.</p>
+      <h3>مثال بعدة لغات</h3>${codeBlock(langs)}`,
+    examples: () => {
+      const picks = cats.filter((c) => c.items.length).slice(0, 5).map((c) => ({ c, i: c.items[0] }));
+      return `<h2>${T.icon('code')} أمثلة على الاستخدام</h2><p>أمثلة حقيقية من الخدمات المتاحة حالياً:</p>`
+        + picks.map(({ c, i }) => `<h3>${T.esc(c.title)} — ${T.esc(i.name)}</h3>${codeBlock([['cURL', `curl "${origin}${i.path.replace(/=$/, '=value')}" \\\n  -H "x-api-key: YOUR_API_KEY"`]])}`).join('')
+        + `<h3>معالجة الأخطاء (JavaScript)</h3>` + codeBlock([['JavaScript', `const res = await fetch(url, { headers: { "x-api-key": KEY } });\nconst data = await res.json();\nif (!res.ok || data.status === false) {\n  throw new Error(data.message || "Request failed");\n}\nconsole.log(data);`]]);
+    },
+    auth: () => `<h2>${T.icon('key')} المفاتيح والمصادقة</h2>
+      <p>المفتاح يربط طلباتك بحسابك ويفتح لك حد خطتك اليومي. بدون مفتاح تعمل الخدمات المفتوحة بحد أقل للزوار${cfg.requireKeyGlobal ? '، <b>لكن المنصة حالياً تتطلب مفتاحاً لكل الطلبات</b>' : ''}.</p>
+      <ul><li>صيغة المفتاح: <code class="inline">tb_live_xxxxxxxx…</code></li><li>يظهر المفتاح كاملاً <b>مرة واحدة فقط</b> عند إنشائه، فاحفظه في مكان آمن.</li><li>لا تضعه في كود الواجهة الأمامية العلني.</li><li>يمكنك إلغاء أي مفتاح فوراً من لوحة التحكم.</li></ul>
+      ${codeBlock([['الهيدر (مفضّل)', `x-api-key: tb_live_xxxxxxxxxxxxxxxx`], ['معامل الرابط', `${full}${sepr}apikey=tb_live_xxxxxxxxxxxxxxxx`]])}
+      <p style="margin-top:14px">${T.user ? `<a class="btn btn-primary btn-sm" href="/keys">${T.icon('key')} إدارة مفاتيحي</a>` : `<a class="btn btn-primary btn-sm" href="/register">${T.icon('rocket')} أنشئ حساباً للحصول على مفتاح</a>`}</p>`,
+    limits: () => {
+      const rows = Object.entries(cfg.plans || {}).map(([k, p]) => `<tr><td><b>${T.esc(p.name)}</b></td><td>${p.dailyLimit === 0 ? 'غير محدود' : T.num(p.dailyLimit) + ' طلب'}</td><td>${p.maxKeys}</td></tr>`).join('');
+      return `<h2>${T.icon('chart')} الحدود والخطط</h2><p>يُحسب الاستهلاك يومياً (بتوقيت UTC) ويتجدد تلقائياً.</p>
+        <div class="table-wrap"><table class="tbl"><thead><tr><th>الخطة</th><th>الحد اليومي</th><th>عدد المفاتيح</th></tr></thead><tbody>${rows}</tbody></table></div>
+        <h3>هيدرات مفيدة</h3><ul><li><code class="inline">X-Daily-Limit</code> و <code class="inline">X-Daily-Remaining</code>: حدك اليومي والمتبقي منه.</li><li><code class="inline">Retry-After</code>: ثوانٍ للانتظار عند تلقي 429.</li></ul>
+        <p>الزوار بدون مفتاح لهم حد ${T.num(cfg.anonymousPerMinute || 120)} طلب/دقيقة تقريباً لكل عنوان IP. للترقية <a href="/support?subject=${encodeURIComponent('طلب ترقية الخطة')}" style="color:var(--p4)">تواصل معنا</a>.</p>`;
+    },
+    errors: () => `<h2>${T.icon('alert')} الأخطاء الشائعة</h2><p>كل الأخطاء تعود بصيغة JSON فيها <code class="inline">status:false</code> و <code class="inline">message</code>.</p>
+      ${ERRORS.map(([c, t, d]) => `<div class="err-row"><span class="badge ${c < 500 ? 'warn' : 'err'}">${c}</span><div><b>${t}</b><div class="muted" style="font-size:14px">${d}</div></div></div>`).join('')}
+      <h3>مثال</h3><div class="codebox">${T.highlight(JSON.stringify({ status: false, creator: 'TERBO API', message: 'API Key غير صالح أو ملغي' }, null, 2))}</div>`,
+  };
+  T.$('#content').innerHTML = (html[sec] || html[''])();
+
+  T.$('#content').addEventListener('click', (e) => {
+    const tab = e.target.closest('.tabs button'); if (tab && tab.parentElement.dataset.for) {
+      const id = tab.parentElement.dataset.for; const data = JSON.parse(T.$('#' + id + '-d').textContent);
+      T.$$('button', tab.parentElement).forEach((b) => b.classList.toggle('active', b === tab)); T.$('#' + id).textContent = data[+tab.dataset.i];
+    }
+    const cp = e.target.closest('[data-copy]'); if (cp) T.copy(T.$('#' + cp.dataset.copy).textContent);
+  });
+});
+</script>
+</body>
+</html>

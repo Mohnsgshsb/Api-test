@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>لوحة الإدارة — TERBO API</title>
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#06021a"><link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Rajdhani:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/css/app.css"><script src="/assets/js/app.js"></script>
+</head>
+<body>
+<div class="admin-shell">
+  <aside class="admin-side" id="side"></aside>
+  <main class="admin-main">
+    <div class="admin-bar"><button class="icon-btn admin-menu" id="menu" aria-label="القائمة"></button><div class="grow"><h1 id="h1"></h1><div class="sub" id="sub"></div></div><div id="barActions" class="row"></div></div>
+    <div id="view"><div class="skeleton" style="height:200px"></div></div>
+  </main>
+</div>
+<script>
+const NAV = [
+  ['', 'نظرة عامة', 'dashboard', 'ملخص الأداء والنشاط'],
+  ['users', 'المستخدمون', 'users', 'إدارة الحسابات والصلاحيات والخطط'],
+  ['keys', 'مفاتيح API', 'key', 'كل المفاتيح وحدودها'],
+  ['catalog', 'الأقسام والخدمات', 'layers', 'تحكم كامل في ما يظهر للزوار'],
+  ['endpoints', 'سياسات الـ Endpoints', 'server', 'إيقاف وتقييد وإلزام بالمفتاح لكل مسار'],
+  ['requests', 'سجل الطلبات', 'activity', 'آخر الطلبات على الخدمات'],
+  ['tickets', 'تذاكر الدعم', 'headset', 'الرد على رسائل المستخدمين'],
+  ['settings', 'إعدادات الموقع', 'cog', 'الصيانة والتسجيل والخطط والتنبيهات'],
+  ['audit', 'سجل العمليات', 'shield', 'من فعل ماذا ومتى'],
+];
+const sec = (location.pathname.split('/').filter(Boolean)[1]) || '';
+const A = (p, o) => T.adm(p, o);
+const qsOf = (o) => Object.entries(o).filter(([, v]) => v !== '' && v != null).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+const $v = (id, root) => T.$('#' + id, root);
+const sw = (id, on) => `<label class="switch"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}><span></span></label>`;
+const fld = (label, inner, hint) => `<div class="field"><label>${label}</label>${inner}${hint ? `<span class="hint">${hint}</span>` : ''}</div>`;
+const sel = (id, opts, val) => `<select class="select" id="${id}">${opts.map(([v, l]) => `<option value="${T.esc(v)}" ${String(v) === String(val) ? 'selected' : ''}>${T.esc(l)}</option>`).join('')}</select>`;
+const pager = (d, go) => { const id = 'pg' + Math.random().toString(36).slice(2, 6); setTimeout(() => { const e = T.$('#' + id); if (!e) return; e.onclick = (ev) => { const b = ev.target.closest('button[data-p]'); if (b && !b.disabled) go(+b.dataset.p); }; }); return `<div class="pager" id="${id}"><button class="btn btn-ghost btn-sm" data-p="${d.page - 1}" ${d.page <= 1 ? 'disabled' : ''}>${T.icon('chevR')} السابق</button><span>صفحة ${d.page} من ${d.pages} · ${T.num(d.total)} عنصر</span><button class="btn btn-ghost btn-sm" data-p="${d.page + 1}" ${d.page >= d.pages ? 'disabled' : ''}>التالي ${T.icon('chevL')}</button></div>`; };
+const empty = (t) => `<div class="empty">${T.icon('database')}${t}</div>`;
+const kpi = (ic, v, l) => `<div class="card a-kpi"><div class="ico-box sm">${T.icon(ic)}</div><div><b>${v}</b><span>${l}</span></div></div>`;
+const view = () => T.$('#view');
+const setBar = (html) => { T.$('#barActions').innerHTML = html || ''; };
+
+/* ================= Sections ================= */
+const S = {};
+
+S[''] = async () => {
+  const o = await A('/overview');
+  const max = Math.max(1, ...o.daily.map((d) => d.total));
+  const up = o.uptimeSeconds, upTxt = up > 86400 ? Math.floor(up / 86400) + ' يوم' : up > 3600 ? Math.floor(up / 3600) + ' ساعة' : Math.floor(up / 60) + ' دقيقة';
+  view().innerHTML = `
+    <div class="a-kpis">
+      ${kpi('users', T.num(o.users.total), `مستخدم (${o.users.today} جديد اليوم)`)}${kpi('key', `${o.keys.active}/${o.keys.total}`, 'مفاتيح فعّالة')}
+      ${kpi('activity', T.num(o.requests.today), 'طلبات اليوم')}${kpi('chart', T.compact(o.requests.total), 'إجمالي الطلبات')}
+      ${kpi('alert', o.requests.errorRate + '%', 'نسبة الأخطاء')}${kpi('bolt', o.requests.avgMs + 'ms', 'متوسط الاستجابة')}
+      ${kpi('headset', o.tickets.open, `تذاكر مفتوحة من ${o.tickets.total}`)}${kpi('layers', `${o.services.enabled}/${o.services.total}`, `خدمة مفعّلة في ${o.services.categories} قسم`)}
+    </div>
+    <div class="card mb"><div class="row wrap between"><div class="row"><b>وضع الموقع</b>
+      <span class="badge ${o.settings.maintenance ? 'warn' : 'ok'}">${o.settings.maintenance ? 'صيانة' : 'يعمل'}</span><span class="badge ${o.settings.registrationEnabled ? 'ok' : 'err'}">التسجيل ${o.settings.registrationEnabled ? 'مفتوح' : 'مغلق'}</span><span class="badge">تشغيل الخادم: ${upTxt}</span></div>
+      <div class="row"><button class="btn btn-ghost btn-sm" id="tm">${T.icon('wrench')} ${o.settings.maintenance ? 'إنهاء الصيانة' : 'تفعيل الصيانة'}</button><button class="btn btn-ghost btn-sm" id="tr">${T.icon('users')} ${o.settings.registrationEnabled ? 'إغلاق التسجيل' : 'فتح التسجيل'}</button></div></div></div>
+    <div class="two-col">
+      <div class="card"><div class="card-title">${T.icon('chart')} الطلبات — آخر 14 يوماً</div>
+        <div class="legend"><span><i style="background:#8b5cf6"></i>ناجح</span><span><i style="background:#fb7185"></i>فشل</span></div>
+        <div class="bars">${o.daily.map((d) => `<div class="b" title="${d.date}: ${d.total}"><div style="width:100%;display:flex;flex-direction:column;justify-content:flex-end;height:120px">${d.err ? `<i class="err" style="height:${Math.max(3, (d.err / max) * 120)}px;border-radius:6px 6px 0 0"></i>` : ''}${d.ok ? `<i style="height:${Math.max(3, (d.ok / max) * 120)}px;border-radius:${d.err ? '0' : '6px 6px 0 0'}"></i>` : ''}${d.total ? '' : '<i style="height:2px;opacity:.25"></i>'}</div><small>${d.date.slice(8)}</small></div>`).join('')}</div></div>
+      <div class="card"><div class="card-title">${T.icon('users')} التسجيلات الجديدة</div>${T.lineChart(o.signups.map((d) => d.date.slice(8)), o.signups.map((d) => d.count), { h: 190 })}</div>
+    </div>
+    <div class="two-col">
+      <div class="card"><div class="card-title">${T.icon('server')} أكثر المسارات استخداماً</div>${o.topPaths.length ? `<div class="table-wrap"><table class="tbl"><tbody>${o.topPaths.map((p) => `<tr><td><span class="path" dir="ltr">${T.esc(p.path)}</span></td><td><b>${T.num(p.count)}</b></td></tr>`).join('')}</tbody></table></div>` : empty('لا توجد بيانات بعد')}</div>
+      <div class="card"><div class="card-title">${T.icon('user')} أحدث المستخدمين</div>${o.recentUsers.map((u) => `<div class="row" style="padding:8px 0;border-bottom:1px dashed var(--line)"><span class="avatar">${T.esc(u.username[0].toUpperCase())}</span><div class="grow"><b>${T.esc(u.username)}</b><div class="muted" style="font-size:12px">${T.esc(u.email)}</div></div><span class="muted" style="font-size:12px">${T.ago(u.createdAt)}</span></div>`).join('')}</div>
+    </div>
+    <div class="card"><div class="card-title">${T.icon('alert')} آخر الأخطاء</div>${o.recentErrors.length ? `<div class="table-wrap"><table class="tbl"><tbody>${o.recentErrors.map((r) => `<tr><td><span class="badge err">${r.statusCode}</span></td><td><span class="path" dir="ltr">${T.esc(r.path)}</span></td><td class="muted">${r.durationMs}ms</td><td class="muted">${T.ago(r.createdAt)}</td></tr>`).join('')}</tbody></table></div>` : empty('لا توجد أخطاء مسجّلة 🎉')}</div>`;
+  const patch = async (b) => { await A('/settings', { method: 'PATCH', body: b }); load(); };
+  T.$('#tm').onclick = () => patch({ maintenance: !o.settings.maintenance });
+  T.$('#tr').onclick = () => patch({ registrationEnabled: !o.settings.registrationEnabled });
+};
+</script>
+<script>
+/* ===== Users ===== */
+S.users = async () => {
+  const st = { q: '', role: '', status: '', plan: '', page: 1 };
+  setBar(`<button class="btn btn-primary btn-sm" id="addU">${T.icon('plus')} مستخدم جديد</button>`);
+  view().innerHTML = `<div class="toolbar"><input class="input search" id="q" type="search" placeholder="بحث بالاسم أو البريد..."><select class="select" id="fr"></select><select class="select" id="fs"></select><select class="select" id="fp"></select></div><div class="card"><div id="tbl"></div></div>`;
+  let plans = {};
+  const userForm = (u = {}) => `<div class="grid-2">${fld('اسم المستخدم', `<input class="input" id="f_un" value="${T.esc(u.username || '')}" maxlength="24">`)}${fld('البريد', `<input class="input ltr" id="f_em" value="${T.esc(u.email || '')}">`)}</div>
+    <div class="grid-3">${fld('الصلاحية', sel('f_role', [['user', 'مستخدم'], ['admin', 'مدير']], u.role || 'user'))}${fld('الحالة', sel('f_st', [['active', 'فعّال'], ['blocked', 'موقوف']], u.status || 'active'))}${fld('الخطة', sel('f_pl', Object.entries(plans).map(([k, p]) => [k, p.name]), u.plan || Object.keys(plans)[0]))}</div>
+    <div class="grid-2">${fld('حد يومي مخصص', `<input class="input" id="f_dl" type="number" min="0" value="${u.limits?.dailyLimit ?? ''}" placeholder="حسب الخطة">`, '0 = غير محدود، فارغ = حسب الخطة')}${fld('أقصى عدد مفاتيح', `<input class="input" id="f_mk" type="number" min="1" value="${u.limits?.maxKeys ?? ''}" placeholder="حسب الخطة">`)}</div>
+    ${fld(u.id ? 'كلمة مرور جديدة' : 'كلمة المرور', `<input class="input" id="f_pw" type="text" autocomplete="off" placeholder="${u.id ? 'اتركها فارغة بدون تغيير' : '8 أحرف على الأقل'}">`)}`;
+  const body = (bg) => ({ username: $v('f_un', bg).value.trim(), email: $v('f_em', bg).value.trim(), role: $v('f_role', bg).value, status: $v('f_st', bg).value, plan: $v('f_pl', bg).value, limits: { dailyLimit: $v('f_dl', bg).value, maxKeys: $v('f_mk', bg).value }, password: $v('f_pw', bg).value || undefined });
+  const draw = async () => {
+    const d = await A('/users?' + qsOf({ ...st, limit: 15 })); plans = d.plans;
+    if (!T.$('#fr').options.length) { T.$('#fr').innerHTML = '<option value="">كل الصلاحيات</option><option value="admin">مدير</option><option value="user">مستخدم</option>'; T.$('#fs').innerHTML = '<option value="">كل الحالات</option><option value="active">فعّال</option><option value="blocked">موقوف</option>'; T.$('#fp').innerHTML = '<option value="">كل الخطط</option>' + Object.entries(plans).map(([k, p]) => `<option value="${k}">${T.esc(p.name)}</option>`).join(''); }
+    T.$('#tbl').innerHTML = d.items.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>المستخدم</th><th>الصلاحية</th><th>الخطة</th><th>الحالة</th><th>اليوم / الإجمالي</th><th>انضم</th><th></th></tr></thead><tbody>${d.items.map((u) => `<tr data-id="${u.id}"><td><div class="row"><span class="avatar">${T.esc(u.username[0].toUpperCase())}</span><div><b>${T.esc(u.username)}</b><div class="muted" style="font-size:12px">${T.esc(u.email)}</div></div></div></td>
+      <td><span class="badge ${u.role === 'admin' ? 'warn' : ''}">${u.role === 'admin' ? 'مدير' : 'مستخدم'}</span></td><td>${T.esc(plans[u.plan]?.name || u.plan)}</td><td><span class="badge ${u.status === 'blocked' ? 'err' : 'ok'}">${u.status === 'blocked' ? 'موقوف' : 'فعّال'}</span></td>
+      <td>${T.num(u.usedToday)} / ${T.num(u.totalRequests)} <span class="muted" style="font-size:12px">· ${u.keys} مفتاح</span></td><td class="muted" style="font-size:12.5px">${T.date(u.createdAt)}</td>
+      <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" data-a="edit">${T.icon('edit')}</button> ${u.root ? '' : `<button class="btn btn-ghost btn-sm" data-a="block" title="${u.status === 'blocked' ? 'رفع الإيقاف' : 'إيقاف'}">${T.icon(u.status === 'blocked' ? 'check' : 'lock')}</button> <button class="btn btn-danger btn-sm" data-a="del">${T.icon('trash')}</button>`}</td></tr>`).join('')}</tbody></table></div>${pager(d, (p) => { st.page = p; draw(); })}` : empty('لا يوجد مستخدمون مطابقون');
+    window.__users = d.items;
+  };
+  await draw();
+  T.$('#q').oninput = T.debounce((e) => { st.q = e.target.value; st.page = 1; draw(); });
+  [['fr', 'role'], ['fs', 'status'], ['fp', 'plan']].forEach(([id, k]) => { T.$('#' + id).onchange = (e) => { st[k] = e.target.value; st.page = 1; draw(); }; });
+  T.$('#addU').onclick = () => T.modal({ title: T.icon('plus') + ' مستخدم جديد', wide: true, html: userForm(), actions: [{ label: 'إنشاء', cls: 'btn-primary', onClick: async (bg) => { await A('/users', { method: 'POST', body: body(bg) }); T.toast('تم إنشاء المستخدم'); draw(); return true; } }, { label: 'إلغاء' }] });
+  T.$('#tbl').addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-a]'); if (!b) return; const id = b.closest('tr').dataset.id; const u = window.__users.find((x) => x.id === id);
+    if (b.dataset.a === 'edit') T.modal({ title: T.icon('edit') + ' ' + T.esc(u.username), wide: true, html: userForm(u) + `<div class="row wrap"><label class="check"><input type="checkbox" id="f_rev"> إنهاء كل جلساته</label><label class="check"><input type="checkbox" id="f_ru"> تصفير استهلاك اليوم</label></div>`,
+      actions: [{ label: 'حفظ', cls: 'btn-primary', onClick: async (bg) => { await A('/users/' + id, { method: 'PATCH', body: { ...body(bg), revokeSessions: $v('f_rev', bg).checked, resetUsage: $v('f_ru', bg).checked } }); T.toast('تم الحفظ'); draw(); return true; } }, { label: 'إلغاء' }] });
+    if (b.dataset.a === 'block') { try { await A('/users/' + id, { method: 'PATCH', body: { status: u.status === 'blocked' ? 'active' : 'blocked' } }); T.toast('تم التحديث'); draw(); } catch (er) { T.err(er); } }
+    if (b.dataset.a === 'del' && await T.confirm(`حذف المستخدم «${u.username}» مع مفاتيحه وتذاكره نهائياً؟`, { ok: 'حذف' })) { try { await A('/users/' + id, { method: 'DELETE' }); T.toast('تم الحذف'); draw(); } catch (er) { T.err(er); } }
+  });
+};
+
+/* ===== Keys ===== */
+S.keys = async () => {
+  const st = { q: '', active: '', page: 1 };
+  setBar(`<button class="btn btn-primary btn-sm" id="addK">${T.icon('plus')} إنشاء مفتاح لمستخدم</button>`);
+  view().innerHTML = `<div class="toolbar"><input class="input search" id="q" type="search" placeholder="بحث بالمالك أو الاسم..."><select class="select" id="fa"><option value="">الكل</option><option value="1">فعّالة</option><option value="0">ملغاة</option></select></div><div class="card"><div id="tbl"></div></div>`;
+  const draw = async () => {
+    const d = await A('/keys?' + qsOf({ ...st, limit: 15 })); window.__keys = d.items;
+    T.$('#tbl').innerHTML = d.items.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>المالك</th><th>الاسم</th><th>المفتاح</th><th>الطلبات</th><th>آخر استخدام</th><th>حد مخصص</th><th>الحالة</th><th></th></tr></thead><tbody>${d.items.map((k) => `<tr data-id="${k.id}"><td><b>${T.esc(k.owner)}</b></td><td>${T.esc(k.name)}</td><td class="mono ltr" style="font-size:12px">${T.esc(k.hint)}</td><td>${T.num(k.requests)}</td><td class="muted">${k.lastUsedAt ? T.ago(k.lastUsedAt) : '—'}</td><td>${k.limits?.limit != null ? `${k.limits.limit}/${k.limits.windowSeconds}s` : '—'}</td>
+      <td><label class="switch"><input type="checkbox" data-a="tog" ${k.active ? 'checked' : ''}><span></span></label></td><td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" data-a="lim" title="حد مخصص">${T.icon('gauge')}</button> <button class="btn btn-danger btn-sm" data-a="del">${T.icon('trash')}</button></td></tr>`).join('')}</tbody></table></div>${pager(d, (p) => { st.page = p; draw(); })}` : empty('لا توجد مفاتيح');
+  };
+  await draw();
+  T.$('#q').oninput = T.debounce((e) => { st.q = e.target.value; st.page = 1; draw(); });
+  T.$('#fa').onchange = (e) => { st.active = e.target.value; st.page = 1; draw(); };
+  T.$('#addK').onclick = async () => {
+    const u = await A('/users?limit=200');
+    T.modal({ title: T.icon('key') + ' مفتاح جديد', html: fld('المستخدم', sel('k_u', u.items.map((x) => [x.id, `${x.username} — ${x.email}`]))) + fld('اسم المفتاح', '<input class="input" id="k_n" value="مفتاح من الإدارة" maxlength="40">'),
+      actions: [{ label: 'إنشاء', cls: 'btn-primary', onClick: async (bg) => { const r = await A('/keys', { method: 'POST', body: { userId: $v('k_u', bg).value, name: $v('k_n', bg).value } }); draw(); setTimeout(() => T.showSecret('المفتاح الجديد', r.key.token, r.message), 50); return true; } }, { label: 'إلغاء' }] });
+  };
+  T.$('#tbl').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-a]'); if (!b) return; const id = b.closest('tr').dataset.id; const k = window.__keys.find((x) => x.id === id);
+    if (b.dataset.a === 'tog') { try { await A('/keys/' + id, { method: 'PATCH', body: { active: b.checked } }); T.toast(b.checked ? 'تم التفعيل' : 'تم الإيقاف'); } catch (er) { T.err(er); b.checked = !b.checked; } }
+    if (b.dataset.a === 'lim') T.modal({ title: 'حد مخصص للمفتاح', html: `<p class="muted" style="margin-top:0">يُطبَّق على المسارات التي لها سياسة تقييد مفعّلة. اترك الحد فارغاً لإزالته.</p><div class="grid-2">${fld('عدد الطلبات', `<input class="input" id="l_n" type="number" min="0" value="${k.limits?.limit ?? ''}">`)}${fld('خلال (ثانية)', `<input class="input" id="l_w" type="number" min="1" value="${k.limits?.windowSeconds ?? 60}">`)}</div>`,
+      actions: [{ label: 'حفظ', cls: 'btn-primary', onClick: async (bg) => { await A('/keys/' + id, { method: 'PATCH', body: { limits: { limit: $v('l_n', bg).value, windowSeconds: $v('l_w', bg).value } } }); draw(); return true; } }, { label: 'إلغاء' }] });
+    if (b.dataset.a === 'del' && await T.confirm('حذف هذا المفتاح نهائياً؟', { ok: 'حذف' })) { await A('/keys/' + id, { method: 'DELETE' }); T.toast('تم الحذف'); draw(); }
+  });
+};
+
+/* ===== Catalog ===== */
+S.catalog = async () => {
+  setBar(`<button class="btn btn-primary btn-sm" id="addC">${T.icon('plus')} قسم جديد</button><button class="btn btn-ghost btn-sm" id="rst">${T.icon('refresh')} استعادة الافتراضي</button>`);
+  const open = new Set(JSON.parse(sessionStorage.getItem('adm_open') || '[]'));
+  const iconPicker = (cur) => `<div class="icon-pick" id="ip">${T.iconNames.map((n) => `<button type="button" data-i="${n}" class="${n === cur ? 'on' : ''}" title="${n}">${T.icon(n)}</button>`).join('')}</div>`;
+  const wirePick = (bg) => { T.$('#ip', bg).onclick = (e) => { const b = e.target.closest('button'); if (!b) return; T.$$('#ip button', bg).forEach((x) => x.classList.toggle('on', x === b)); }; };
+  const picked = (bg) => (T.$('#ip button.on', bg) || {}).dataset?.i || 'cube';
+  const catForm = (c = {}) => fld('الاسم (إنجليزي)', `<input class="input ltr" id="c_n" value="${T.esc(c.name || '')}" maxlength="40">`) + fld('العنوان المعروض', `<input class="input" id="c_t" value="${T.esc(c.title || '')}" maxlength="40">`) + fld('الوصف', `<input class="input" id="c_d" value="${T.esc(c.description || '')}" maxlength="200">`) + fld('الأيقونة', iconPicker(c.icon || 'cube')) + `<label class="check"><input type="checkbox" id="c_e" ${c.enabled !== false ? 'checked' : ''}> ظاهر للزوار</label>`;
+  const itemForm = (i = {}, cats = [], cid = '') => fld('اسم الخدمة', `<input class="input" id="i_n" value="${T.esc(i.name || '')}" maxlength="60">`) + fld('الشرح', `<textarea class="input" id="i_d" rows="2" maxlength="300">${T.esc(i.desc || '')}</textarea>`) + fld('القسم', sel('i_c', cats.map((c) => [c.id, c.title]), cid)) + fld('المسار', `<input class="input ltr" id="i_p" value="${T.esc(i.path || '')}" placeholder="/api/my-service?q=" maxlength="400">`, 'يبدأ بـ /api/ (أو /tools/ ...) وما بعد ؟ يظهر كحقول في المجرّب') + `<div class="grid-2">${fld('الطريقة', sel('i_m', ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((m) => [m, m]), i.method || 'GET'))}<div class="field"><label>مفعّلة</label>${sw('i_e', i.enabled !== false)}</div></div>`
+    + fld('نوع التنفيذ', sel('i_k', [['builtin', 'مدمجة (كود موجود في السيرفر)'], ['static', 'رد ثابت (JSON أو نص)'], ['proxy', 'تحويل لرابط خارجي (Proxy)']], i.kind || 'builtin'))
+    + `<div id="k_static" class="hidden">${fld('الرد', `<textarea class="input ltr" id="i_r" rows="6" placeholder='{"hello":"{{name}}"}'>${T.esc(i.response || '')}</textarea>`, 'يمكنك استخدام {{param}} ليُستبدل بقيمة المعامل من الطلب')}</div>`
+    + `<div id="k_proxy" class="hidden">${fld('رابط الوجهة', `<input class="input ltr" id="i_t" value="${T.esc(i.target || '')}" placeholder="https://example.com/api?q={{q}}">`, 'استخدم {{param}} لقيم الطلب. باقي المعاملات تُمرَّر تلقائياً. الروابط الداخلية/الخاصة محجوبة.')}</div>`;
+  const wireKind = (bg) => { const k = T.$('#i_k', bg), upd = () => { T.$('#k_static', bg).classList.toggle('hidden', k.value !== 'static'); T.$('#k_proxy', bg).classList.toggle('hidden', k.value !== 'proxy'); }; k.onchange = upd; upd(); };
+  const itemBody = (bg) => ({ name: $v('i_n', bg).value, desc: $v('i_d', bg).value, path: $v('i_p', bg).value, method: $v('i_m', bg).value, enabled: $v('i_e', bg).checked, kind: $v('i_k', bg).value, target: $v('i_t', bg).value, response: $v('i_r', bg).value });
+  const draw = async () => {
+    const d = await A('/users?' + qsOf({ ...st, limit: 15 })); plans = d.plans;
+    if (!T.$('#fr').options.length) { T.$('#fr').innerHTML = '<option value="">كل الصلاحيات</option><option value="admin">مدير</option><option value="user">مستخدم</option>'; T.$('#fs').innerHTML = '<option value="">كل الحالات</option><option value="active">فعّال</option><option value="blocked">موقوف</option>'; T.$('#fp').innerHTML = '<option value="">كل الخطط</option>' + Object.entries(plans).map(([k, p]) => `<option value="${k}">${T.esc(p.name)}</option>`).join(''); }
+    T.$('#tbl').innerHTML = d.items.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>المستخدم</th><th>الصلاحية</th><th>الخطة</th><th>الحالة</th><th>اليوم / الإجمالي</th><th>انضم</th><th></th></tr></thead><tbody>${d.items.map((u) => `<tr data-id="${u.id}"><td><div class="row"><span class="avatar">${T.esc(u.username[0].toUpperCase())}</span><div><b>${T.esc(u.username)}</b><div class="muted" style="font-size:12px">${T.esc(u.email)}</div></div></div></td>
+      <td><span class="badge ${u.role === 'admin' ? 'warn' : ''}">${u.role === 'admin' ? 'مدير' : 'مستخدم'}</span></td><td>${T.esc(plans[u.plan]?.name || u.plan)}</td><td><span class="badge ${u.status === 'blocked' ? 'err' : 'ok'}">${u.status === 'blocked' ? 'موقوف' : 'فعّال'}</span></td>
+      <td>${T.num(u.usedToday)} / ${T.num(u.totalRequests)} <span class="muted" style="font-size:12px">· ${u.keys} مفتاح</span></td><td class="muted" style="font-size:12.5px">${T.date(u.createdAt)}</td>
+      <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" data-a="edit">${T.icon('edit')}</button> ${u.root ? '' : `<button class="btn btn-ghost btn-sm" data-a="block" title="${u.status === 'blocked' ? 'رفع الإيقاف' : 'إيقاف'}">${T.icon(u.status === 'blocked' ? 'check' : 'lock')}</button> <button class="btn btn-danger btn-sm" data-a="del">${T.icon('trash')}</button>`}</td></tr>`).join('')}</tbody></table></div>${pager(d, (p) => { st.page = p; draw(); })}` : empty('لا يوجد مستخدمون مطابقون');
+    window.__users = d.items;
+  };
+  await draw();
+  T.$('#q').oninput = T.debounce((e) => { st.q = e.target.value; st.page = 1; draw(); });
+  [['fr', 'role'], ['fs', 'status'], ['fp', 'plan']].forEach(([id, k]) => { T.$('#' + id).onchange = (e) => { st[k] = e.target.value; st.page = 1; draw(); }; });
+  T.$('#addU').onclick = () => T.modal({ title: T.icon('plus') + ' مستخدم جديد', wide: true, html: userForm(), actions: [{ label: 'إنشاء', cls: 'btn-primary', onClick: async (bg) => { await A('/users', { method: 'POST', body: body(bg) }); T.toast('تم إنشاء المستخدم'); draw(); return true; } }, { label: 'إلغاء' }] });
+  T.$('#tbl').addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-a]'); if (!b) return; const id = b.closest('tr').dataset.id; const u = window.__users.find((x) => x.id === id);
+    if (b.dataset.a === 'edit') T.modal({ title: T.icon('edit') + ' ' + T.esc(u.username), wide: true, html: userForm(u) + `<div class="row wrap"><label class="check"><input type="checkbox" id="f_rev"> إنهاء كل جلساته</label><label class="check"><input type="checkbox" id="f_ru"> تصفير استهلاك اليوم</label></div>`,
+      actions: [{ label: 'حفظ', cls: 'btn-primary', onClick: async (bg) => { await A('/users/' + id, { method: 'PATCH', body: { ...body(bg), revokeSessions: $v('f_rev', bg).checked, resetUsage: $v('f_ru', bg).checked } }); T.toast('تم الحفظ'); draw(); return true; } }, { label: 'إلغاء' }] });
+    if (b.dataset.a === 'block') { try { await A('/users/' + id, { method: 'PATCH', body: { status: u.status === 'blocked' ? 'active' : 'blocked' } }); T.toast('تم التحديث'); draw(); } catch (er) { T.err(er); } }
+    if (b.dataset.a === 'del' && await T.confirm(`حذف المستخدم «${u.username}» مع مفاتيحه وتذاكره نهائياً؟`, { ok: 'حذف' })) { try { await A('/users/' + id, { method: 'DELETE' }); T.toast('تم الحذف'); draw(); } catch (er) { T.err(er); } }
+  });
+};
+
+/* ===== Keys ===== */
+S.keys = async () => {
+  const st = { q: '', active: '', page: 1 };
+  setBar(`<button class="btn btn-primary btn-sm" id="addK">${T.icon('plus')} إنشاء مفتاح لمستخدم</button>`);
+  view().innerHTML = `<div class="toolbar"><input class="input search" id="q" type="search" placeholder="بحث بالمالك أو الاسم..."><select class="select" id="fa"><option value="">الكل</option><option value="1">فعّالة</option><option value="0">ملغاة</option></select></div><div class="card"><div id="tbl"></div></div>`;
+  const draw = async () => {
+    const d = await A('/keys?' + qsOf({ ...st, limit: 15 })); window.__keys = d.items;
+    T.$('#tbl').innerHTML = d.items.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>المالك</th><th>الاسم</th><th>المفتاح</th><th>الطلبات</th><th>آخر استخدام</th><th>حد مخصص</th><th>الحالة</th><th></th></tr></thead><tbody>${d.items.map((k) => `<tr data-id="${k.id}"><td><b>${T.esc(k.owner)}</b></td><td>${T.esc(k.name)}</td><td class="mono ltr" style="font-size:12px">${T.esc(k.hint)}</td><td>${T.num(k.requests)}</td><td class="muted">${k.lastUsedAt ? T.ago(k.lastUsedAt) : '—'}</td><td>${k.limits?.limit != null ? `${k.limits.limit}/${k.limits.windowSeconds}s` : '—'}</td>
+      <td><label class="switch"><input type="checkbox" data-a="tog" ${k.active ? 'checked' : ''}><span></span></label></td><td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" data-a="lim" title="حد مخصص">${T.icon('gauge')}</button> <button class="btn btn-danger btn-sm" data-a="del">${T.icon('trash')}</button></td></tr>`).join('')}</tbody></table></div>${pager(d, (p) => { st.page = p; draw(); })}` : empty('لا توجد مفاتيح');
+  };
+  await draw();
+  T.$('#q').oninput = T.debounce((e) => { st.q = e.target.value; st.page = 1; draw(); });
+  T.$('#fa').onchange = (e) => { st.active = e.target.value; st.page = 1; draw(); };
+  T.$('#addK').onclick = async () => {
+    const u = await A('/users?limit=200');
+    T.modal({ title: T.icon('key') + ' مفتاح جديد', html: fld('المستخدم', sel('k_u', u.items.map((x) => [x.id, `${x.username} — ${x.email}`]))) + fld('اسم المفتاح', '<input class="input" id="k_n" value="مفتاح من الإدارة" maxlength="40">'),
+      actions: [{ label: 'إنشاء', cls: 'btn-primary', onClick: async (bg) => { const r = await A('/keys', { method: 'POST', body: { userId: $v('k_u', bg).value, name: $v('k_n', bg).value } }); draw(); setTimeout(() => T.showSecret('المفتاح الجديد', r.key.token, r.message), 50); return true; } }, { label: 'إلغاء' }] });
+  };
+  T.$('#tbl').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-a]'); if (!b) return; const id = b.closest('tr').dataset.id; const k = window.__keys.find((x) => x.id === id);
+    if (b.dataset.a === 'tog') { try { await A('/keys/' + id, { method: 'PATCH', body: { active: b.checked } }); T.toast(b.checked ? 'تم التفعيل' : 'تم الإيقاف'); } catch (er) { T.err(er); b.checked = !b.checked; } }
+    if (b.dataset.a === 'lim') T.modal({ title: 'حد مخصص للمفتاح', html: `<p class="muted" style="margin-top:0">يُطبَّق على المسارات التي لها سياسة تقييد مفعّلة. اترك الحد فارغاً لإزالته.</p><div class="grid-2">${fld('عدد الطلبات', `<input class="input" id="l_n" type="number" min="0" value="${k.limits?.limit ?? ''}">`)}${fld('خلال (ثانية)', `<input class="input" id="l_w" type="number" min="1" value="${k.limits?.windowSeconds ?? 60}">`)}</div>`,
+      actions: [{ label: 'حفظ', cls: 'btn-primary', onClick: async (bg) => { await A('/keys/' + id, { method: 'PATCH', body: { limits: { limit: $v('l_n', bg).value, windowSeconds: $v('l_w', bg).value } } }); draw(); return true; } }, { label: 'إلغاء' }] });
+    if (b.dataset.a === 'del' && await T.confirm('حذف هذا المفتاح نهائياً؟', { ok: 'حذف' })) { await A('/keys/' + id, { method: 'DELETE' }); T.toast('تم الحذف'); draw(); }
+  });
+};
+
+/* ===== Catalog ===== */
+S.catalog = async () => {
+  setBar(`<button class="btn btn-primary btn-sm" id="addC">${T.icon('plus')} قسم جديد</button><button class="btn btn-ghost btn-sm" id="rst">${T.icon('refresh')} استعادة الافتراضي</button>`);
+  const open = new Set(JSON.parse(sessionStorage.getItem('adm_open') || '[]'));
+  const iconPicker = (cur) => `<div class="icon-pick" id="ip">${T.iconNames.map((n) => `<button type="button" data-i="${n}" class="${n === cur ? 'on' : ''}" title="${n}">${T.icon(n)}</button>`).join('')}</div>`;
+  const wirePick = (bg) => { T.$('#ip', bg).onclick = (e) => { const b = e.target.closest('button'); if (!b) return; T.$$('#ip button', bg).forEach((x) => x.classList.toggle('on', x === b)); }; };
+  const picked = (bg) => (T.$('#ip button.on', bg) || {}).dataset?.i || 'cube';
+  const catForm = (c = {}) => fld('الاسم (إنجليزي)', `<input class="input ltr" id="c_n" value="${T.esc(c.name || '')}" maxlength="40">`) + fld('العنوان المعروض', `<input class="input" id="c_t" value="${T.esc(c.title || '')}" maxlength="40">`) + fld('الوصف', `<input class="input" id="c_d" value="${T.esc(c.description || '')}" maxlength="200">`) + fld('الأيقونة', iconPicker(c.icon || 'cube')) + `<label class="check"><input type="checkbox" id="c_e" ${c.enabled !== false ? 'checked' : ''}> ظاهر للزوار</label>`;
+  const itemForm = (i = {}) => fld('اسم الخدمة', `<input class="input ltr" id="i_n" value="${T.esc(i.name || '')}" maxlength="60">`) + fld('الوصف', `<input class="input" id="i_d" value="${T.esc(i.desc || '')}" maxlength="300">`) + fld('المسار', `<input class="input ltr" id="i_p" value="${T.esc(i.path || '')}" placeholder="/api/example?q=" maxlength="400">`, 'يبدأ بـ / ويمكن أن يحوي معاملات بعد ؟ لتظهر كحقول في المجرّب') + `<div class="grid-2">${fld('الطريقة', sel('i_m', ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((m) => [m, m]), i.method || 'GET'))}<div class="field"><label>مفعّلة</label>${sw('i_e', i.enabled !== false)}</div></div>`;
+  const draw = async () => {
+    const { categories } = await A('/catalog');
+    view().innerHTML = categories.length ? categories.map((c, ci) => `<div class="card cat-acc" data-c="${c.id}"><header>${T.icon(c.icon)}<h3>${T.esc(c.title)} <span class="muted ltr" style="font-size:12px">/${T.esc(c.slug)}</span></h3><span class="badge">${c.items.length} خدمة</span>${c.enabled === false ? '<span class="badge err">مخفي</span>' : ''}<div class="grow"></div>
+      <button class="btn btn-ghost btn-sm" data-a="cup" ${ci === 0 ? 'disabled' : ''}>${T.icon('up')}</button><button class="btn btn-ghost btn-sm" data-a="cdn" ${ci === categories.length - 1 ? 'disabled' : ''}>${T.icon('down')}</button><button class="btn btn-ghost btn-sm" data-a="cedit">${T.icon('edit')}</button><button class="btn btn-danger btn-sm" data-a="cdel">${T.icon('trash')}</button>${T.icon(open.has(c.id) ? 'chevD' : 'chevL')}</header>
+      <div class="body ${open.has(c.id) ? '' : 'hidden'}">${c.items.map((i, ii) => `<div class="svc ${i.enabled === false ? 'off' : ''}" data-i="${i.id}"><span class="badge ${i.method === 'POST' ? 'post' : 'get'}">${T.esc(i.method)}</span><b>${T.esc(i.name)}</b><span class="p">${T.esc(i.path)}</span>${i.kind && i.kind !== 'builtin' ? `<span class="badge">${i.kind === 'proxy' ? 'Proxy' : 'ثابت'}</span>` : ''}${i.routeExists === false ? `<span class="badge warn" title="لا يوجد كود لهذا المسار في السيرفر">${T.icon('alert')} بدون route</span>` : ''}<div class="grow"></div>
+        <label class="switch"><input type="checkbox" data-a="itog" ${i.enabled !== false ? 'checked' : ''}><span></span></label><button class="btn btn-ghost btn-sm" data-a="iup" ${ii === 0 ? 'disabled' : ''}>${T.icon('up')}</button><button class="btn btn-ghost btn-sm" data-a="idn" ${ii === c.items.length - 1 ? 'disabled' : ''}>${T.icon('down')}</button><button class="btn btn-ghost btn-sm" data-a="iedit">${T.icon('edit')}</button><button class="btn btn-danger btn-sm" data-a="idel">${T.icon('trash')}</button></div>`).join('') || empty('لا توجد خدمات')}
+        <button class="btn btn-ghost btn-sm mt" data-a="iadd">${T.icon('plus')} إضافة خدمة</button></div></div>`).join('') : empty('لا توجد أقسام');
+    window.__cats = categories;
+  };
+  await draw();
+  T.$('#addC').onclick = () => { const m = T.modal({ title: 'قسم جديد', html: catForm(), actions: [{ label: 'إنشاء', cls: 'btn-primary', onClick: async (bg) => { await A('/catalog/categories', { method: 'POST', body: { name: $v('c_n', bg).value, title: $v('c_t', bg).value, description: $v('c_d', bg).value, icon: picked(bg), enabled: $v('c_e', bg).checked } }); draw(); return true; } }, { label: 'إلغاء' }] }); wirePick(m.el); };
+  T.$('#rst').onclick = async () => { if (await T.confirm('سيتم حذف كل تعديلاتك على الأقسام والخدمات وإعادتها للوضع الافتراضي. متأكد؟', { ok: 'استعادة' })) { await A('/catalog/reset', { method: 'POST', body: {} }); T.toast('تمت الاستعادة'); draw(); } };
+  view().addEventListener('click', async (e) => {
+    const card = e.target.closest('.cat-acc'); if (!card) return; const cid = card.dataset.c; const cat = window.__cats.find((c) => c.id === cid);
+    const b = e.target.closest('[data-a]');
+    if (!b) { if (e.target.closest('header')) { open.has(cid) ? open.delete(cid) : open.add(cid); sessionStorage.setItem('adm_open', JSON.stringify([...open])); draw(); } return; }
+    const a = b.dataset.a; const row = b.closest('.svc'); const iid = row && row.dataset.i; const item = iid && cat.items.find((x) => x.id === iid);
+    try {
+      if (a === 'cup' || a === 'cdn') { await A(`/catalog/categories/${cid}/move`, { method: 'POST', body: { dir: a === 'cup' ? -1 : 1 } }); draw(); }
+      else if (a === 'cedit') { const m = T.modal({ title: 'تعديل القسم', html: catForm(cat), actions: [{ label: 'حفظ', cls: 'btn-primary', onClick: async (bg) => { await A('/catalog/categories/' + cid, { method: 'PATCH', body: { name: $v('c_n', bg).value, title: $v('c_t', bg).value, description: $v('c_d', bg).value, icon: picked(bg), enabled: $v('c_e', bg).checked } }); draw(); return true; } }, { label: 'إلغاء' }] }); wirePick(m.el); }
+      else if (a === 'cdel') { if (await T.confirm(`حذف القسم «${cat.title}» وكل خدماته؟`, { ok: 'حذف' })) { await A('/catalog/categories/' + cid, { method: 'DELETE' }); draw(); } }
+      else if (a === 'iadd') { const m = T.modal({ title: 'خدمة / endpoint جديد', wide: true, html: itemForm({}, window.__cats, cid), actions: [{ label: 'إضافة', cls: 'btn-primary', onClick: async (bg) => { const body = itemBody(bg); await A(`/catalog/categories/${$v('i_c', bg).value}/items`, { method: 'POST', body }); open.add($v('i_c', bg).value); draw(); return true; } }, { label: 'إلغاء' }] }); wireKind(m.el); }
+      else if (a === 'iedit') { const m = T.modal({ title: 'تعديل الخدمة', wide: true, html: itemForm(item, window.__cats, cid), actions: [{ label: 'حفظ', cls: 'btn-primary', onClick: async (bg) => { const body = itemBody(bg); body.categoryId = $v('i_c', bg).value; await A('/catalog/items/' + iid, { method: 'PATCH', body }); open.add(body.categoryId); draw(); return true; } }, { label: 'إلغاء' }] }); wireKind(m.el); }
+      else if (a === 'idel') { if (await T.confirm(`حذف الخدمة «${item.name}»؟`, { ok: 'حذف' })) { await A('/catalog/items/' + iid, { method: 'DELETE' }); draw(); } }
+      else if (a === 'itog') { await A('/catalog/items/' + iid, { method: 'PATCH', body: { enabled: b.checked } }); T.toast(b.checked ? 'تم تفعيل الخدمة' : 'تم إيقاف الخدمة'); draw(); }
+      else if (a === 'iup' || a === 'idn') { await A(`/catalog/items/${iid}/move`, { method: 'POST', body: { dir: a === 'iup' ? -1 : 1 } }); draw(); }
+    } catch (er) { T.err(er); if (b.type === 'checkbox') b.checked = !b.checked; }
+  });
+};
+
+/* ===== Endpoints ===== */
+const keyModeOf = (p) => (p && ['default', 'none', 'account', 'custom'].includes(p.keyMode) ? p.keyMode : (p?.requireKey ? 'account' : 'default'));
+const keyBadge = (p) => ({ none: '<span class="badge ok">بدون مفتاح</span>', account: '<span class="badge warn">مفتاح حساب</span>', custom: '<span class="badge warn">مفتاح مخصّص</span>' }[keyModeOf(p)] || '');
+const genKey = () => 'tb_' + Array.from(crypto.getRandomValues(new Uint8Array(20)), (b) => b.toString(16).padStart(2, '0')).join('');
+S.endpoints = async () => {
+  setBar('');
+  const d = await A('/endpoints'); let q = '';
+  view().innerHTML = `<div class="toolbar"><input class="input search" id="q" type="search" placeholder="ابحث عن مسار..."><span class="muted" style="font-size:13px">${d.endpoints.length} مسار مكتشف من ملفات السيرفر</span></div><div class="card"><div id="tbl"></div></div>`;
+  const draw = () => {
+    const list = d.endpoints.filter((e) => e.path.toLowerCase().includes(q) || e.category.toLowerCase().includes(q));
+    T.$('#tbl').innerHTML = list.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>الطريقة</th><th>المسار</th><th>القسم</th><th>الزيارات</th><th>السياسة</th><th></th></tr></thead><tbody>${list.map((e) => { const p = e.policy; return `<tr data-p="${T.esc(e.path)}"><td><span class="badge ${e.method === 'POST' ? 'post' : 'get'}">${e.method}</span></td><td><span class="path" dir="ltr">${T.esc(e.path)}</span></td><td class="muted">${T.esc(e.category)}</td><td>${T.num(e.hits)}</td>
+      <td>${p ? [p.disabled ? '<span class="badge err">متوقف</span>' : '', keyBadge(p), p.enabled && p.limit ? `<span class="badge">${p.limit}/${p.windowSeconds}s</span>` : ''].join(' ') || '<span class="badge">مخصّصة</span>' : '<span class="muted">افتراضي</span>'}</td>
+      <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" data-a="edit">${T.icon('edit')}</button>${p ? ` <button class="btn btn-danger btn-sm" data-a="del">${T.icon('x')}</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>` : empty('لا توجد نتائج');
+  };
+  draw(); T.$('#q').oninput = T.debounce((e) => { q = e.target.value.toLowerCase(); draw(); }, 150);
+  T.$('#tbl').addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-a]'); if (!b) return; const path = b.closest('tr').dataset.p; const ep = d.endpoints.find((x) => x.path === path); const p = ep.policy || { enabled: false, disabled: false, requireKey: false, limit: 60, windowSeconds: 60 };
+    if (b.dataset.a === 'del') { await A('/endpoints?id=' + encodeURIComponent(path), { method: 'DELETE' }); ep.policy = null; T.toast('تمت إزالة السياسة'); draw(); return; }
+    const km = keyModeOf(p);
+    const m = T.modal({ title: `<span class="ltr mono" style="font-size:15px">${T.esc(path)}</span>`, html: `<div class="row between" style="margin-bottom:12px"><div><b>إيقاف المسار</b><div class="muted" style="font-size:12.5px">يرجع 503 لكل الطلبات</div></div>${sw('p_d', p.disabled)}</div>
+      ${fld('مفتاح API لهذا المسار', sel('p_km', [['default', 'حسب الإعداد العام للموقع'], ['none', 'بدون مفتاح (مفتوح للجميع)'], ['account', 'أي مفتاح حساب صالح'], ['custom', 'مفتاح مخصّص لهذا المسار فقط']], km), 'المفتاح المخصّص يعمل على هذا المسار فقط، ولا تعمل عليه مفاتيح الحسابات.')}
+      <div id="p_kbox" style="display:${km === 'custom' ? 'block' : 'none'}">${fld('المفتاح المخصّص', `<div class="row" style="gap:8px"><input class="input mono ltr" id="p_key" dir="ltr" maxlength="128" autocomplete="off" spellcheck="false" value="${T.esc(p.apiKey || '')}" placeholder="8 أحرف على الأقل" style="flex:1"><button type="button" class="btn btn-ghost btn-sm" id="p_gen">توليد</button><button type="button" class="btn btn-ghost btn-sm" id="p_cp">${T.icon('copy')}</button></div>`, 'يُرسل في الهيدر x-api-key أو ?apikey=')}</div>
+      <div class="row between" style="margin-bottom:12px"><div><b>تفعيل حد الطلبات</b><div class="muted" style="font-size:12.5px">لكل مفتاح حساب (أو لكل IP عند المفتاح المخصّص / بدون مفتاح)</div></div>${sw('p_e', p.enabled)}</div>
+      <div class="grid-2">${fld('عدد الطلبات', `<input class="input" id="p_l" type="number" min="0" value="${p.limit}">`)}${fld('خلال (ثانية)', `<input class="input" id="p_w" type="number" min="1" value="${p.windowSeconds}">`)}</div>`,
+      actions: [{ label: 'حفظ', cls: 'btn-primary', onClick: async (bg) => { const mode = $v('p_km', bg).value; const r = await A('/endpoints', { method: 'PUT', body: { id: path, disabled: $v('p_d', bg).checked, keyMode: mode, apiKey: mode === 'custom' ? $v('p_key', bg).value.trim() : '', enabled: $v('p_e', bg).checked, limit: +$v('p_l', bg).value, windowSeconds: +$v('p_w', bg).value } }); ep.policy = r.policy; T.toast('تم الحفظ'); draw(); return true; } }, { label: 'إلغاء' }] });
+    const root = m.el || document;
+    const kmEl = root.querySelector('#p_km'), kbox = root.querySelector('#p_kbox'), kin = root.querySelector('#p_key');
+    kmEl.onchange = () => { kbox.style.display = kmEl.value === 'custom' ? 'block' : 'none'; if (kmEl.value === 'custom' && !kin.value) kin.value = genKey(); };
+    root.querySelector('#p_gen').onclick = () => { kin.value = genKey(); };
+    root.querySelector('#p_cp').onclick = () => T.copy(kin.value, 'تم نسخ المفتاح');
+  });
+};
+
+/* ===== Requests ===== */
+S.requests = async () => {
+  const st = { q: '', status: '', page: 1 };
+  setBar(`<button class="btn btn-danger btn-sm" id="clr">${T.icon('trash')} مسح السجل</button>`);
+  view().innerHTML = `<div class="toolbar"><input class="input search" id="q" type="search" placeholder="فلترة بالمسار..."><select class="select" id="fs"><option value="">كل الحالات</option><option value="ok">ناجحة</option><option value="err">فاشلة</option><option value="429">429</option><option value="401">401</option><option value="500">500</option></select><button class="btn btn-ghost btn-sm" id="rf">${T.icon('refresh')}</button></div><div class="card"><div id="tbl"></div></div>`;
+  const draw = async () => {
+    const d = await A('/requests?' + qsOf({ ...st, limit: 25 }));
+    T.$('#tbl').innerHTML = d.items.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>الحالة</th><th>الطريقة</th><th>المسار</th><th>المستخدم</th><th>المدة</th><th>IP</th><th>الوقت</th></tr></thead><tbody>${d.items.map((r) => `<tr><td><span class="badge ${r.statusCode < 400 ? 'ok' : 'err'}">${r.statusCode}</span></td><td>${T.esc(r.method)}</td><td><span class="path" dir="ltr">${T.esc(r.path)}</span></td><td>${T.esc(r.user)}</td><td class="muted">${r.durationMs}ms</td><td class="muted mono ltr" style="font-size:12px">${T.esc(r.ip || '')}</td><td class="muted" style="font-size:12.5px">${T.date(r.createdAt)}</td></tr>`).join('')}</tbody></table></div>${pager(d, (p) => { st.page = p; draw(); })}` : empty('لا توجد طلبات مسجّلة');
+  };
+  await draw();
+  T.$('#q').oninput = T.debounce((e) => { st.q = e.target.value; st.page = 1; draw(); });
+  T.$('#fs').onchange = (e) => { st.status = e.target.value; st.page = 1; draw(); };
+  T.$('#rf').onclick = draw;
+  T.$('#clr').onclick = async () => { if (await T.confirm('مسح سجل الطلبات بالكامل؟ (الإحصائيات الإجمالية تبقى)', { ok: 'مسح' })) { await A('/requests', { method: 'DELETE' }); draw(); } };
+};
+
+/* ===== Tickets ===== */
+S.tickets = async () => {
+  const st = { q: '', status: '', page: 1 }; setBar('');
+  const ST = { open: ['مفتوحة', 'warn'], in_progress: ['قيد المعالجة', ''], closed: ['مغلقة', 'ok'] };
+  view().innerHTML = `<div class="toolbar"><input class="input search" id="q" type="search" placeholder="بحث في التذاكر..."><select class="select" id="fs"><option value="">كل الحالات</option><option value="open">مفتوحة</option><option value="in_progress">قيد المعالجة</option><option value="closed">مغلقة</option></select></div><div class="card"><div id="tbl"></div></div>`;
+  const draw = async () => {
+    const d = await A('/tickets?' + qsOf({ ...st, limit: 15 })); window.__tk = d.items;
+    T.$('#tbl').innerHTML = d.items.length ? d.items.map((t) => `<button class="ep" data-id="${t.id}" style="margin-bottom:8px"><span class="badge ${ST[t.status][1]}">${ST[t.status][0]}</span>${t.priority === 'high' ? '<span class="badge err">عاجل</span>' : ''}<span class="name" style="direction:rtl;text-align:start"><b>${T.esc(t.subject)}</b> <span class="muted" style="font-size:12px">— ${T.esc(t.username)}</span></span><span class="muted" style="font-size:12px">${T.ago(t.updatedAt || t.createdAt)} · ${t.replies.length} رد</span>${T.icon('chevL')}</button>`).join('') + pager(d, (p) => { st.page = p; draw(); }) : empty('لا توجد تذاكر');
+  };
+  await draw();
+  T.$('#q').oninput = T.debounce((e) => { st.q = e.target.value; st.page = 1; draw(); });
+  T.$('#fs').onchange = (e) => { st.status = e.target.value; st.page = 1; draw(); };
+  T.$('#tbl').addEventListener('click', (e) => {
+    const b = e.target.closest('.ep'); if (!b) return; let t = window.__tk.find((x) => x.id === b.dataset.id);
+    const thread = () => `<div class="thread"><div class="msg user"><small>${T.esc(t.username)} · ${T.date(t.createdAt)}${t.email ? ' · ' + T.esc(t.email) : ''}</small>${T.esc(t.message)}</div>${t.replies.map((r) => `<div class="msg ${r.by}"><small>${T.esc(r.name)}${r.by === 'admin' ? ' (الدعم)' : ''} · ${T.date(r.createdAt)}</small>${T.esc(r.message)}</div>`).join('')}</div>`;
+    const m = T.modal({ title: T.icon('ticket') + ' ' + T.esc(t.subject), wide: true, html: `<div class="row wrap" style="margin-bottom:8px">${sel('t_s', [['open', 'مفتوحة'], ['in_progress', 'قيد المعالجة'], ['closed', 'مغلقة']], t.status)}${sel('t_p', [['low', 'منخفضة'], ['normal', 'عادية'], ['high', 'عاجلة']], t.priority || 'normal')}</div><div id="th">${thread()}</div><textarea class="textarea" id="t_r" style="min-height:90px" placeholder="اكتب ردك للمستخدم..."></textarea>`,
+      actions: [{ label: T.icon('send') + ' إرسال الرد', cls: 'btn-primary', onClick: async (bg) => { const v = $v('t_r', bg).value.trim(); if (v.length < 2) { T.toast('اكتب الرد', 'err'); return false; } const r = await A(`/tickets/${t.id}/reply`, { method: 'POST', body: { message: v } }); t = r.ticket; draw(); return true; } },
+        { label: 'حفظ الحالة', cls: 'btn-ghost', onClick: async (bg) => { await A('/tickets/' + t.id, { method: 'PATCH', body: { status: $v('t_s', bg).value, priority: $v('t_p', bg).value } }); T.toast('تم الحفظ'); draw(); return true; } },
+        { label: T.icon('trash'), cls: 'btn-danger', onClick: async () => { if (!(await T.confirm('حذف التذكرة نهائياً؟', { ok: 'حذف' }))) return false; await A('/tickets/' + t.id, { method: 'DELETE' }); draw(); return true; } }] });
+  });
+};
+
+/* ===== Settings ===== */
+S.settings = async () => {
+  setBar(`<button class="btn btn-primary" id="save">${T.icon('save')} حفظ الإعدادات</button>`);
+  const { settings: s } = await A('/settings'); const plans = JSON.parse(JSON.stringify(s.plans));
+  view().innerHTML = `<div class="two-col" style="grid-template-columns:1fr 1fr">
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div class="card"><div class="card-title">${T.icon('globe')} عام</div>${fld('اسم الموقع', `<input class="input" id="siteName" value="${T.esc(s.siteName)}" maxlength="40">`)}${fld('الوصف المختصر', `<input class="input" id="tagline" value="${T.esc(s.tagline)}" maxlength="200">`)}${fld('حد الزوار (طلب/دقيقة لكل IP)', `<input class="input" id="anon" type="number" min="1" value="${s.anonymousPerMinute}">`)}
+        <div class="row between" style="margin-bottom:12px"><div><b>التسجيل مفتوح</b><div class="muted" style="font-size:12.5px">السماح بإنشاء حسابات جديدة</div></div>${sw('reg', s.registrationEnabled !== false)}</div>
+        <div class="row between"><div><b>إلزام مفتاح API لكل الخدمات</b><div class="muted" style="font-size:12.5px">الطلبات بدون مفتاح تُرفض بـ 401</div></div>${sw('rk', s.requireKeyGlobal)}</div></div>
+      <div class="card"><div class="card-title">${T.icon('wrench')} وضع الصيانة</div><div class="row between" style="margin-bottom:12px"><div><b>تفعيل الصيانة</b><div class="muted" style="font-size:12.5px">يوقف الصفحات والخدمات للزوار (المدير يتجاوزها)</div></div>${sw('mnt', s.maintenance)}</div>${fld('رسالة الصيانة', `<input class="input" id="mmsg" value="${T.esc(s.maintenanceMessage)}" maxlength="300">`)}</div>
+      <div class="card"><div class="card-title">${T.icon('megaphone')} شريط التنبيه</div><div class="row between" style="margin-bottom:12px"><b>إظهار التنبيه أعلى الموقع</b>${sw('an_e', s.announcement.enabled)}</div>${fld('النص', `<input class="input" id="an_t" value="${T.esc(s.announcement.text)}" maxlength="300">`)}${fld('النوع', sel('an_y', [['info', 'معلومة'], ['warn', 'تحذير'], ['success', 'خبر سار']], s.announcement.type))}</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div class="card"><div class="card-title">${T.icon('headset')} بيانات التواصل</div>${fld('البريد', `<input class="input ltr" id="c_e" value="${T.esc(s.contact.email)}">`)}${fld('رابط تيليجرام', `<input class="input ltr" id="c_t" value="${T.esc(s.contact.telegram)}" placeholder="https://t.me/...">`)}${fld('رابط ديسكورد', `<input class="input ltr" id="c_d" value="${T.esc(s.contact.discord)}" placeholder="https://discord.gg/...">`)}</div>
+      <div class="card"><div class="card-title">${T.icon('crown')} الخطط</div><div id="plans"></div><button class="btn btn-ghost btn-sm" id="addP">${T.icon('plus')} خطة جديدة</button>${fld('الخطة الافتراضية للمسجلين الجدد', '<select class="select" id="defp"></select>')}</div>
+      <div class="card"><div class="card-title">${T.icon('shield')} حسابي كمدير</div><p class="muted" style="margin-top:0;font-size:13.5px">تغيير كلمة مرور المدير الحالي.</p>${fld('كلمة المرور الحالية', '<input class="input" id="pw0" type="password" autocomplete="current-password">')}${fld('كلمة المرور الجديدة', '<input class="input" id="pw1" type="password" autocomplete="new-password">')}<button class="btn btn-ghost btn-sm" id="chpw">${T.icon('lock')} تغيير كلمة المرور</button></div>
+      <div class="card"><div class="card-title">${T.icon('database')} نسخة احتياطية</div><p class="muted" style="margin-top:0;font-size:13.5px">تحميل كامل بيانات الموقع JSON (بدون هاشات كلمات المرور).</p><button class="btn btn-ghost btn-sm" id="bk">${T.icon('download')} تحميل النسخة</button></div>
+    </div></div>`;
+  const drawPlans = () => {
+    T.$('#plans').innerHTML = Object.entries(plans).map(([k, p]) => `<div class="plan-edit" data-k="${T.esc(k)}"><div class="field" style="margin:0"><label>المعرّف</label><input class="input ltr" value="${T.esc(k)}" disabled></div><div class="field" style="margin:0"><label>الاسم</label><input class="input" data-f="name" value="${T.esc(p.name)}"></div><div class="field" style="margin:0"><label>طلب/يوم</label><input class="input" type="number" min="0" data-f="dailyLimit" value="${p.dailyLimit}"></div><div class="field" style="margin:0"><label>مفاتيح</label><input class="input" type="number" min="1" data-f="maxKeys" value="${p.maxKeys}"></div><button class="btn btn-danger btn-sm" data-del style="margin-bottom:2px">${T.icon('trash')}</button></div>`).join('')
+      + '<p class="hint muted" style="font-size:12px;margin:0 0 12px">0 = بدون حد يومي.</p>';
+    T.$('#defp').innerHTML = Object.entries(plans).map(([k, p]) => `<option value="${T.esc(k)}" ${k === s.defaultPlan ? 'selected' : ''}>${T.esc(p.name)}</option>`).join('');
+  };
+  drawPlans();
+  const readPlans = () => { T.$$('#plans .plan-edit').forEach((r) => { const k = r.dataset.k; T.$$('[data-f]', r).forEach((i) => { plans[k][i.dataset.f] = i.dataset.f === 'name' ? i.value : Number(i.value); }); }); };
+  T.$('#plans').addEventListener('click', (e) => { const b = e.target.closest('[data-del]'); if (!b) return; readPlans(); delete plans[b.closest('.plan-edit').dataset.k]; drawPlans(); });
+  T.$('#addP').onclick = () => { readPlans(); T.modal({ title: 'خطة جديدة', html: fld('المعرّف (إنجليزي صغير)', '<input class="input ltr" id="np" maxlength="20" placeholder="gold">'), actions: [{ label: 'إضافة', cls: 'btn-primary', onClick: (bg) => { const k = $v('np', bg).value.trim().toLowerCase(); if (!/^[a-z0-9_-]{2,20}$/.test(k) || plans[k]) { T.toast('معرّف غير صالح أو مستخدم', 'err'); return false; } plans[k] = { name: k, dailyLimit: 5000, maxKeys: 5 }; drawPlans(); return true; } }, { label: 'إلغاء' }] }); };
+  T.$('#save').onclick = async (e) => {
+    readPlans();
+    try {
+      await T.spinBtn(e.currentTarget, () => A('/settings', { method: 'PATCH', body: { siteName: $v('siteName').value, tagline: $v('tagline').value, anonymousPerMinute: +$v('anon').value, registrationEnabled: $v('reg').checked, requireKeyGlobal: $v('rk').checked, maintenance: $v('mnt').checked, maintenanceMessage: $v('mmsg').value, announcement: { enabled: $v('an_e').checked, text: $v('an_t').value, type: $v('an_y').value }, contact: { email: $v('c_e').value, telegram: $v('c_t').value, discord: $v('c_d').value }, plans, defaultPlan: $v('defp').value } }));
+      T.toast('تم حفظ الإعدادات');
+    } catch (er) { T.err(er); }
+  };
+  T.$('#chpw').onclick = async () => { try { await T.acc('/auth/profile', { method: 'PATCH', body: { password: $v('pw1').value, currentPassword: $v('pw0').value } }).then((d) => { if (d.token) T.setAuth(d.token, d.user); }); T.toast('تم تغيير كلمة المرور'); $v('pw0').value = $v('pw1').value = ''; } catch (er) { T.err(er); } };
+  T.$('#bk').onclick = async () => { try { const r = await fetch('/api/account/admin/backup', { headers: { Authorization: 'Bearer ' + T.token } }); if (!r.ok) throw new Error('تعذر تحميل النسخة'); const u = URL.createObjectURL(await r.blob()); const a = document.createElement('a'); a.href = u; a.download = `terbo-backup-${new Date().toISOString().slice(0, 10)}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(u), 3000); } catch (er) { T.err(er); } };
+};
+
+/* ===== Audit ===== */
+S.audit = async () => {
+  setBar(''); let page = 1; view().innerHTML = '<div class="card"><div id="tbl"></div></div>';
+  const draw = async () => {
+    const d = await A('/audit?page=' + page + '&limit=25');
+    T.$('#tbl').innerHTML = d.items.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>الوقت</th><th>المنفّذ</th><th>العملية</th><th>التفاصيل</th></tr></thead><tbody>${d.items.map((a) => `<tr><td class="muted" style="font-size:12.5px;white-space:nowrap">${T.date(a.createdAt)}</td><td><b>${T.esc(a.actor)}</b></td><td><span class="badge mono ltr">${T.esc(a.action)}</span></td><td class="muted mono ltr" style="font-size:12px;max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${T.esc(JSON.stringify(a.details))}</td></tr>`).join('')}</tbody></table></div>${pager(d, (p) => { page = p; draw(); })}` : empty('لا توجد عمليات مسجّلة');
+  };
+  draw();
+};
+
+/* ================= Boot ================= */
+async function load() {
+  const nav = NAV.find((n) => n[0] === sec) || NAV[0];
+  T.$('#h1').textContent = nav[1]; T.$('#sub').textContent = nav[3]; document.title = `${nav[1]} — لوحة الإدارة`;
+  try { await (S[nav[0]] || S[''])(); } catch (e) { view().innerHTML = `<div class="card"><div class="form-error">${T.esc(e.message)}</div></div>`; }
+}
+T.ready(async () => {
+  const me = await T.requireUser(true);
+  T.$('#menu').innerHTML = T.icon('menu');
+  let open = 0; try { open = (await T.adm('/overview')).tickets.open; } catch (e) { /* ignore */ }
+  T.$('#side').innerHTML = `${T.logoHtml}${NAV.map(([s, l, ic]) => `<a href="/admin${s ? '/' + s : ''}" class="${s === sec ? 'active' : ''}">${T.icon(ic)} ${l}${s === 'tickets' && open ? `<span class="count">${open}</span>` : ''}</a>`).join('')}
+    <div class="foot"><div class="row" style="padding:8px 10px"><span class="avatar">${T.esc(me.username[0].toUpperCase())}</span><div><b style="font-size:13px">${T.esc(me.username)}</b><div class="muted" style="font-size:11.5px">مدير</div></div></div><a href="/" target="_blank">${T.icon('ext')} عرض الموقع</a><a href="/dashboard">${T.icon('gauge')} لوحتي</a><a href="#" id="out">${T.icon('logout')} تسجيل الخروج</a></div>`;
+  T.$('#out').onclick = (e) => { e.preventDefault(); T.logout('/admin/login'); };
+  T.$('#menu').onclick = () => T.$('#side').classList.toggle('open');
+  document.addEventListener('click', (e) => { if (!e.target.closest('#side') && !e.target.closest('#menu')) T.$('#side').classList.remove('open'); });
+  await load();
+});
+</script>
+</body>
+</html>

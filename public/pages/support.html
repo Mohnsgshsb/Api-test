@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>الدعم الفني — TERBO API</title>
+<meta name="theme-color" content="#06021a"><link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Rajdhani:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/css/app.css"><script src="/assets/js/app.js"></script>
+</head>
+<body>
+<div id="hdr"></div>
+<main class="container page" style="max-width:860px">
+  <div class="page-head"><div class="ico-box" id="ico"></div><div><h1>الدعم الفني</h1><p>تواصل معنا في أي وقت، فريق الدعم جاهز لمساعدتك وحل مشكلتك</p></div></div>
+  <div class="contact-grid" id="contacts"></div>
+  <div class="card glow"><div class="card-title" id="formTitle"></div><div id="formBox"></div></div>
+  <div class="card hidden" id="mineCard" style="margin-top:18px"><div class="card-title" id="mineTitle"></div><div id="mine"></div></div>
+</main>
+<div id="ftr"></div>
+<script>
+const ST = { open: ['مفتوحة', 'warn'], in_progress: ['قيد المعالجة', ''], closed: ['مغلقة', 'ok'] };
+T.ready(async () => {
+  T.$('#ico').innerHTML = T.icon('headset');
+  T.$('#formTitle').innerHTML = T.icon('send') + ' أرسل لنا رسالة';
+  T.$('#mineTitle').innerHTML = T.icon('ticket') + ' رسائلي السابقة';
+  const cfg = await T.config(); const c = cfg.contact || {};
+  const cards = [];
+  if (c.telegram) cards.push(['telegram', 'تيليجرام', c.telegram.replace(/^https?:\/\//, ''), c.telegram]);
+  if (c.discord) cards.push(['discord', 'ديسكورد', 'انضم لسيرفرنا', c.discord]);
+  if (c.email) cards.push(['mail', 'البريد الإلكتروني', c.email, 'mailto:' + c.email]);
+  T.$('#contacts').innerHTML = cards.map(([ic, t, s, h]) => `<a class="contact" href="${T.esc(h)}" ${h.startsWith('http') ? 'target="_blank" rel="noopener"' : ''}>${T.icon(ic)}<b>${t}</b><small>${T.esc(s)}</small></a>`).join('');
+  if (!cards.length) T.$('#contacts').remove();
+
+  const box = T.$('#formBox');
+  if (!T.user) { box.innerHTML = `<div class="empty">${T.icon('lock')}سجّل دخولك لإرسال رسالة ومتابعة الرد عليها.<div class="mt"><a class="btn btn-primary" href="/login?next=${encodeURIComponent('/support')}">تسجيل الدخول</a> <a class="btn btn-ghost" href="/register">إنشاء حساب</a></div></div>`; return; }
+  box.innerHTML = `<form id="f"><div class="field"><label>الموضوع</label><input class="input" id="subject" maxlength="100" placeholder="عنوان مختصر لمشكلتك" value="${T.esc(T.qs('subject') || '')}"></div>
+    <div class="field"><label>رسالتك</label><textarea class="textarea" id="message" maxlength="4000" placeholder="اكتب رسالتك هنا..."></textarea></div>
+    <button class="btn btn-primary btn-block" id="go">${T.icon('send')} إرسال</button></form>`;
+  T.$('#f').onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await T.spinBtn(T.$('#go'), () => T.acc('/support', { method: 'POST', body: { subject: T.$('#subject').value, message: T.$('#message').value } }));
+      T.toast('تم إرسال رسالتك، سنرد عليك قريباً'); T.$('#message').value = ''; T.$('#subject').value = ''; load();
+    } catch (err) { T.err(err); }
+  };
+  async function load() {
+    try {
+      const { tickets } = await T.acc('/tickets');
+      T.$('#mineCard').classList.toggle('hidden', !tickets.length);
+      T.$('#mine').innerHTML = tickets.map((t) => `<button class="ep" data-id="${t.id}" style="margin-bottom:8px"><span class="badge ${ST[t.status]?.[1] || ''}">${ST[t.status]?.[0] || t.status}</span><span class="name" style="direction:rtl;text-align:start">${T.esc(t.subject)}</span><span class="muted" style="font-size:12px">${T.ago(t.updatedAt)}${t.replies ? ` · ${t.replies} رد` : ''}</span>${T.icon('chevL')}</button>`).join('');
+    } catch (e) { /* handled */ }
+  }
+  T.$('#mine').addEventListener('click', async (e) => {
+    const b = e.target.closest('.ep'); if (!b) return;
+    const render = (t) => `<div class="thread"><div class="msg user"><small>${T.esc(T.user.username)} · ${T.date(t.createdAt)}</small>${T.esc(t.message)}</div>${t.thread.map((r) => `<div class="msg ${r.by}"><small>${r.by === 'admin' ? 'الدعم الفني' : T.esc(r.name)} · ${T.date(r.createdAt)}</small>${T.esc(r.message)}</div>`).join('')}</div>
+      ${t.status === 'closed' ? '<p class="muted center" style="font-size:13px">هذه التذكرة مغلقة. يمكنك الرد لإعادة فتحها.</p>' : ''}<textarea class="textarea" id="rep" style="min-height:80px" placeholder="اكتب ردك..."></textarea>`;
+    try {
+      const { ticket } = await T.acc('/tickets/' + b.dataset.id);
+      const m = T.modal({ title: T.icon('ticket') + ' ' + T.esc(ticket.subject), wide: true, html: render(ticket), actions: [
+        { label: T.icon('send') + ' إرسال الرد', cls: 'btn-primary', onClick: async (bg) => { const v = T.$('#rep', bg).value.trim(); if (v.length < 2) { T.toast('اكتب ردك', 'err'); return false; } const r = await T.acc('/tickets/' + ticket.id + '/reply', { method: 'POST', body: { message: v } }); T.toast('تم إرسال الرد'); load(); return true; } },
+        { label: 'إغلاق', cls: 'btn-ghost' }] });
+    } catch (err) { T.err(err); }
+  });
+  load();
+});
+</script>
+</body>
+</html>

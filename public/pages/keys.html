@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>مفاتيح API — TERBO API</title>
+<meta name="theme-color" content="#06021a"><link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Rajdhani:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/css/app.css"><script src="/assets/js/app.js"></script>
+</head>
+<body>
+<div id="hdr"></div>
+<main class="container page" style="max-width:900px">
+  <div class="page-head"><div class="ico-box" id="ico"></div><div class="grow"><h1>مفاتيح API</h1><p id="sub">أنشئ مفاتيحك وتحكم فيها</p></div><button class="btn btn-primary" id="create"></button></div>
+  <div class="card"><div class="table-wrap"><table class="tbl"><thead><tr><th>الاسم</th><th>المفتاح</th><th>الطلبات</th><th>آخر استخدام</th><th>الحالة</th><th></th></tr></thead><tbody id="rows"></tbody></table></div></div>
+  <div class="card" style="margin-top:18px"><div class="card-title">${''}</div>
+    <p class="muted" style="margin:0 0 10px">أرسل المفتاح في هيدر <code class="inline mono">x-api-key</code> مع كل طلب:</p>
+    <div style="position:relative"><button class="copy-btn" id="cp"></button><div class="codebox" id="snip" style="padding-top:38px"></div></div></div>
+</main>
+<div id="ftr"></div>
+<script>
+T.ready(async () => {
+  await T.requireUser();
+  T.$('#ico').innerHTML = T.icon('key'); T.$('#create').innerHTML = T.icon('plus') + ' مفتاح جديد'; T.$('.card-title', T.$$('.card')[1]).innerHTML = T.icon('terminal') + ' طريقة الاستخدام';
+  T.$('#cp').innerHTML = T.icon('copy') + ' نسخ';
+  const snip = `curl "${location.origin}/api/status" \\\n  -H "x-api-key: YOUR_API_KEY"`; T.$('#snip').textContent = snip; T.$('#cp').onclick = () => T.copy(snip);
+  let plan = T.plan;
+  async function load() {
+    const { keys } = await T.acc('/keys'); const active = keys.filter((k) => k.active).length;
+    T.$('#sub').textContent = `${active} من ${plan.maxKeys} مفاتيح فعّالة في خطتك`;
+    T.$('#rows').innerHTML = keys.length ? keys.map((k) => `<tr data-id="${k.id}" class="${k.active ? '' : 'muted'}"><td><b>${T.esc(k.name)}</b></td><td class="mono ltr" style="font-size:12.5px">${T.esc(k.hint)}</td><td>${T.num(k.requests)}</td><td>${k.lastUsedAt ? T.ago(k.lastUsedAt) : '—'}</td>
+      <td><span class="badge ${k.active ? 'ok' : 'err'}">${k.active ? 'فعّال' : 'ملغي'}</span></td>
+      <td style="white-space:nowrap"><button class="icon-btn" data-a="rename" title="تعديل الاسم" style="width:34px;height:34px;display:inline-grid">${T.icon('edit')}</button> <button class="icon-btn" data-a="del" title="${k.active ? 'إلغاء المفتاح' : 'حذف'}" style="width:34px;height:34px;display:inline-grid;color:var(--red)">${T.icon(k.active ? 'power' : 'trash')}</button></td></tr>`).join('')
+      : `<tr><td colspan="6"><div class="empty">${T.icon('key')}لا توجد مفاتيح. اضغط «مفتاح جديد» للبدء.</div></td></tr>`;
+    return keys;
+  }
+  let keys = await load();
+  T.$('#create').onclick = () => T.modal({ title: T.icon('key') + ' مفتاح جديد', html: '<div class="field"><label>اسم المفتاح</label><input class="input" id="kn" maxlength="40" placeholder="مثال: تطبيق الموبايل" value="مفتاح جديد"></div>',
+    actions: [{ label: 'إنشاء', cls: 'btn-primary', onClick: async (bg) => { const r = await T.acc('/keys', { method: 'POST', body: { name: T.$('#kn', bg).value } }); keys = await load(); setTimeout(() => T.showSecret('مفتاحك الجديد', r.key.token, r.message), 50); return true; } }, { label: 'إلغاء' }] });
+  T.$('#rows').addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-a]'); if (!b) return; const id = b.closest('tr').dataset.id; const k = keys.find((x) => x.id === id);
+    if (b.dataset.a === 'rename') {
+      T.modal({ title: 'تعديل الاسم', html: `<div class="field"><input class="input" id="rn" maxlength="40" value="${T.esc(k.name)}"></div>`, actions: [{ label: 'حفظ', cls: 'btn-primary', onClick: async (bg) => { await T.acc('/keys/' + id, { method: 'PATCH', body: { name: T.$('#rn', bg).value } }); keys = await load(); return true; } }, { label: 'إلغاء' }] });
+    } else if (await T.confirm(k.active ? 'سيتوقف هذا المفتاح فوراً عن العمل. متأكد؟' : 'سيتم حذف المفتاح من القائمة نهائياً.', { ok: k.active ? 'إلغاء المفتاح' : 'حذف' })) {
+      try { await T.acc('/keys/' + id, { method: 'DELETE' }); T.toast('تم'); keys = await load(); } catch (err) { T.err(err); }
+    }
+  });
+});
+</script>
+</body>
+</html>
