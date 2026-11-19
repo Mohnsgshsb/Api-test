@@ -61,7 +61,9 @@ let db = null;
 let dirty = false;
 let timer = null;
 let catalogVersion = 0;
-let remoteDirty = false;
+let importantDirty = false;
+let volatileDirty = false;
+let lastVolPush = 0;
 let lastPull = 0;
 let pulling = null;
 let pushing = null;
@@ -107,7 +109,7 @@ function flushSync() {
 /** volatile = تغييرات خفيفة (إحصائيات/عدّادات) لا تستحق كتابة دائمة بعيدة. */
 function schedule(volatile = false) {
   dirty = true;
-  if (!volatile) remoteDirty = true;
+  if (volatile) volatileDirty = true; else importantDirty = true;
   if (REMOTE) return; // على Vercel الحفظ يتم عبر commit() قبل إنهاء الرد
   if (timer) return;
   timer = setTimeout(() => { timer = null; try { flushSync(); } catch (e) { console.error('[store] فشل الحفظ:', e.message); } }, 400);
@@ -122,60 +124,89 @@ function update(fn) { try { return Promise.resolve(mutate(fn)); } catch (e) { re
 function save(volatile = false) { schedule(volatile); }
 
 
-/* ---------- التخزين الدائم البعيد (Vercel) ---------- */
-function replaceDb(next) {
-  const keepRequests = db?.requests || [];
-  const fresh = normalize(next);
-  fresh.requests = keepRequests;
-  if (db) { for (const k of Object.keys(db)) delete db[k]; Object.assign(db, fresh); } else db = fresh;
-  catalogVersion++;
-}
+/* ---------- التخزين الدائم في GitHub: كل جزء في ملف .json مستقل ---------- */
+const byId = (local, remoteArr) => { const have = new Set(local.map((x) => x.id)); for (const it of remoteArr || []) if (!have.has(it.id)) local.push(it); };
 
-function mergeFromRemote(remoteData) {
-  // عند التعارض: نضيف أي سجلات موجودة عند الطرف الآخر وغير موجودة عندنا (مستخدمين/مفاتيح/تذاكر) ثم نكتب
-  const r = normalize(remoteData);
-  for (const k of ['users', 'apiKeys', 'tickets']) {
-    const have = new Set(db[k].map((x) => x.id));
-    for (const item of r[k]) if (!have.has(item.id)) db[k].push(item);
+// volatile = بيانات كثيرة التغيّر (تُحفظ كل 60 ثانية كحد أدنى) | merge = دمج عند التعارض مع instance آخر
+const FILE_DEFS = {
+  'users.json': { get: (d) => d.users, set: (d, v) => { d.users = v; }, merge: (d, r) => byId(d.users, r) },
+  'api-keys.json': { get: (d) => d.apiKeys, set: (d, v) => { d.apiKeys = v; }, merge: (d, r) => byId(d.apiKeys, r) },
+  'tickets.json': { get: (d) => d.tickets, set: (d, v) => { d.tickets = v; }, merge: (d, r) => byId(d.tickets, r) },
+  'settings.json': { get: (d) => ({ settings: d.settings, endpointPolicies: d.endpointPolicies }), set: (d, v) => { Object.assign(d, v); } },
+  'catalog.json': { get: (d) => d.catalog, set: (d, v) => { d.catalog = v; } },
+  'audit.json': { get: (d) => d.auditLog, set: (d, v) => { d.auditLog = v; } },
+  'meta.json': { get: (d) => ({ createdAt: d.createdAt, jwtSecret: d.jwtSecret || null }), set: (d, v) => { Object.assign(d, v); } },
+  'requests.json': { volatile: true, get: (d) => d.requests, set: (d, v) => { d.requests = v; }, merge: (d, r) => { byId(d.requests, r); d.requests.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt))); d.requests.splice(0, Math.max(0, d.requests.length - 5000)); } },
+  'stats.json': { volatile: true, get: (d) => ({ stats: d.stats, usage: d.usage }), set: (d, v) => { Object.assign(d, v); } },
+};
+const serialize = (name, v) => JSON.stringify(v ?? null, null, FILE_DEFS[name].volatile ? 0 : 2);
+const lastHash = {};
+
+function applyRemoteFiles(files, emptyRemote) {
+  const raw = db ? null : normalize(null);
+  if (!db) db = raw;
+  for (const [name, data] of Object.entries(files)) {
+    const def = FILE_DEFS[name];
+    if (!def || data == null) continue;
+    if (def.volatile && volatileDirty && def.merge) { def.merge(db, Array.isArray(data) ? data : []); continue; } // لا نفقد طلبات لم تُحفظ بعد
+    if (def.volatile && volatileDirty) continue;
+    def.set(db, data);
+    lastHash[name] = sha256(serialize(name, def.get(db)));
   }
+  const n = normalize(db);
+  for (const k of Object.keys(db)) delete db[k];
+  Object.assign(db, n);
+  catalogVersion++;
+  if (emptyRemote) { importantDirty = true; volatileDirty = true; }
 }
 
 /** تحميل آخر نسخة من GitHub (مع كاش قصير). force=true يتجاهل الكاش. */
 async function sync(force = false) {
   if (!REMOTE) return;
-  if (pushing) await pushing.catch(() => {});
+  while (pushing) await pushing.catch(() => {});
   if (!force && db && Date.now() - lastPull < 2000) return;
   if (pulling) return pulling;
   pulling = (async () => {
     const r = await remote.pull();
     lastPull = Date.now();
-    if (r.error && !db) load();
-    else if (r.changed) {
-      if (r.data) replaceDb(r.data);
-      else if (!db) { db = normalize(null); }
-      if (!r.data) remoteDirty = true; // أول تشغيل: نكتب النسخة الأولية
-    }
-    if (!db) load();
+    if (r.error) { if (!db) load(); return; }
+    if (r.changed || !db) applyRemoteFiles(r.files, r.empty);
   })().finally(() => { pulling = null; });
   return pulling;
 }
 
-/** يكتب التغييرات المهمة إلى GitHub (يُستدعى قبل إنهاء الرد على Vercel). */
-async function commit() {
-  if (!REMOTE || !remoteDirty || !db) return;
-  if (pushing) { await pushing.catch(() => {}); if (!remoteDirty) return; }
-  pushing = (async () => {
-    remoteDirty = false;
-    const snapshot = () => ({ ...db, requests: [], auditLog: db.auditLog.slice(0, 200) });
-    let r = await remote.push(snapshot());
+async function pushFiles(includeVolatile) {
+  const failed = [];
+  for (const [name, def] of Object.entries(FILE_DEFS)) {
+    if (def.volatile && !includeVolatile) continue;
+    let text = serialize(name, def.get(db));
+    if (lastHash[name] === sha256(text)) continue;
+    let r = await remote.putFile(name, text);
     for (let i = 0; i < 2 && r.conflict; i++) {
-      const latest = await remote.pull();
-      if (latest.data) mergeFromRemote(latest.data);
-      r = await remote.push(snapshot());
+      const latest = await remote.pullFile(name);
+      if (latest != null && def.merge) def.merge(db, Array.isArray(latest) ? latest : []);
+      text = serialize(name, def.get(db));
+      r = await remote.putFile(name, text);
     }
-    if (!r.ok) { remoteDirty = true; console.error('[store] تعذر حفظ قاعدة البيانات على GitHub'); }
-    else lastPull = Date.now();
-  })().finally(() => { pushing = null; });
+    if (r.ok) lastHash[name] = sha256(text); else failed.push(name);
+  }
+  return failed;
+}
+
+/** يكتب أي تغييرات إلى GitHub (يُستدعى قبل إنهاء الرد). البيانات الخفيفة تُحفظ كل 60 ثانية كحد أدنى. */
+async function commit() {
+  if (!REMOTE || !db) return;
+  while (pushing) await pushing.catch(() => {});
+  const volDue = volatileDirty && Date.now() - lastVolPush > 60000;
+  if (!importantDirty && !volDue) return;
+  importantDirty = false;
+  if (volDue) { volatileDirty = false; lastVolPush = Date.now(); }
+  pushing = pushFiles(volDue).then((failed) => {
+    if (failed.length) {
+      console.error('[store] تعذر حفظ على GitHub:', failed.join(', '));
+      if (failed.some((n) => !FILE_DEFS[n].volatile)) importantDirty = true; else volatileDirty = true;
+    } else lastPull = Date.now();
+  }).finally(() => { pushing = null; });
   return pushing;
 }
 

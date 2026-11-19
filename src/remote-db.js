@@ -1,63 +1,82 @@
 'use strict';
 /**
- * تخزين دائم لقاعدة البيانات داخل ملف JSON في مستودع GitHub (نفس إعدادات DATA_REPO_*).
- * يُستخدم على Vercel لأن قرص Vercel للقراءة فقط وكل طلب قد يمر على instance مختلف.
+ * تخزين دائم داخل ريبو GitHub: كل جزء من البيانات في ملف .json مستقل داخل مجلد (الافتراضي terbo-data/).
  * يعتمد على fetch المدمج في Node 18+ (بدون مكتبات).
+ *  - listing واحد للمجلد (مع ETag) يكشف أي ملف تغيّر، ثم نقرأ الملفات المتغيرة فقط.
+ *  - الكتابة ملف بملف (Contents API) مع sha، وعند التعارض يرجع { conflict: true }.
  */
 const owner = process.env.DATA_REPO_OWNER;
 const repo = process.env.DATA_REPO_NAME || 'api-data';
 const branch = process.env.DATA_REPO_BRANCH || 'main';
 const token = process.env.DATA_REPO_TOKEN;
-const FILE = process.env.DATA_REPO_DB_FILE || 'terbo/app-db.json';
+const DIR = String(process.env.DATA_REPO_DIR || 'terbo-data').replace(/^\/+|\/+$/g, '');
 const API = process.env.GITHUB_API_BASE || 'https://api.github.com';
-const url = `${API}/repos/${owner}/${repo}/contents/${FILE}`;
+const base = `${API}/repos/${owner}/${repo}`;
 
-const IS_VERCEL = !!(process.env.VERCEL || process.env.VERCEL_ENV);
-const enabled = () => Boolean(owner && token && (IS_VERCEL || process.env.REMOTE_DB === '1'));
+/** مفعّل تلقائياً لو DATA_REPO_OWNER و DATA_REPO_TOKEN موجودين (REMOTE_DB=0 لإيقافه). */
+const enabled = () => Boolean(owner && token && process.env.REMOTE_DB !== '0');
 
 const headers = (extra = {}) => ({ Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'terbo-api', ...extra });
-const timeout = (ms) => AbortSignal.timeout(ms);
+const sig = (ms) => AbortSignal.timeout(ms);
+const q = `ref=${encodeURIComponent(branch)}`;
 
-let sha = null;
+const shas = {};   // name -> sha الحالي في GitHub
 let etag = null;
 
-/** يرجع { changed, data } — data = null لو الملف غير موجود بعد. */
+async function getBlob(sha) {
+  const r = await fetch(`${base}/git/blobs/${sha}`, { headers: headers(), signal: sig(20000) });
+  if (!r.ok) throw new Error(`blob HTTP ${r.status}`);
+  const j = await r.json();
+  return Buffer.from(j.content, 'base64').toString('utf8');
+}
+
+/** يرجع { changed, files: {name: parsedJson}, empty } — files = الملفات التي تغيّرت فقط. */
 async function pull() {
   try {
-    const r = await fetch(`${url}?ref=${encodeURIComponent(branch)}`, { headers: headers(etag ? { 'If-None-Match': etag } : {}), signal: timeout(8000) });
-    if (r.status === 304) return { changed: false };
-    if (r.status === 404) { sha = null; etag = null; return { changed: true, data: null }; }
+    const r = await fetch(`${base}/contents/${DIR}?${q}`, { headers: headers(etag ? { 'If-None-Match': etag } : {}), signal: sig(8000) });
+    if (r.status === 304) return { changed: false, files: {} };
+    if (r.status === 404) { for (const k of Object.keys(shas)) delete shas[k]; etag = null; return { changed: true, files: {}, empty: true }; }
     if (!r.ok) throw new Error(`HTTP ${r.status} ${(await r.text()).slice(0, 200)}`);
-    const meta = await r.json();
-    sha = meta.sha; etag = r.headers.get('etag');
-    let text;
-    if (meta.content) text = Buffer.from(meta.content, 'base64').toString('utf8');
-    else { // ملف أكبر من 1MB: نقرأه بصيغة raw
-      const raw = await fetch(`${url}?ref=${encodeURIComponent(branch)}`, { headers: headers({ Accept: 'application/vnd.github.raw+json' }), signal: timeout(15000) });
-      if (!raw.ok) throw new Error(`raw HTTP ${raw.status}`);
-      text = await raw.text();
-    }
-    return { changed: true, data: JSON.parse(text) };
+    const list = (await r.json()).filter((e) => e.type === 'file' && e.name.endsWith('.json'));
+    etag = r.headers.get('etag');
+    const todo = list.filter((e) => shas[e.name] !== e.sha);
+    const files = {};
+    await Promise.all(todo.map(async (e) => { files[e.name] = JSON.parse(await getBlob(e.sha)); shas[e.name] = e.sha; }));
+    return { changed: todo.length > 0, files, empty: list.length === 0 };
   } catch (e) {
     console.error('[remote-db] pull failed:', e.message);
-    return { changed: false, error: true };
+    return { changed: false, files: {}, error: true };
   }
 }
 
-/** يكتب الملف. عند التعارض يرجع { conflict: true } ليتولى المستدعي الدمج وإعادة المحاولة. */
-async function push(value, message = 'update db') {
-  const body = { message, branch, content: Buffer.from(JSON.stringify(value)).toString('base64'), ...(sha ? { sha } : {}) };
+/** قراءة ملف واحد (للدمج عند التعارض) وتحديث sha الخاص به. */
+async function pullFile(name) {
   try {
-    const r = await fetch(url, { method: 'PUT', headers: headers({ 'Content-Type': 'application/json' }), body: JSON.stringify(body), signal: timeout(15000) });
+    const r = await fetch(`${base}/contents/${DIR}/${name}?${q}`, { headers: headers(), signal: sig(8000) });
+    if (r.status === 404) { delete shas[name]; return null; }
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const meta = await r.json();
+    shas[name] = meta.sha; etag = null;
+    return JSON.parse(meta.content ? Buffer.from(meta.content, 'base64').toString('utf8') : await getBlob(meta.sha));
+  } catch (e) {
+    console.error(`[remote-db] pullFile ${name} failed:`, e.message);
+    return null;
+  }
+}
+
+/** يكتب ملفاً واحداً. { ok } | { conflict } | { error } */
+async function putFile(name, text, message) {
+  const body = { message: message || `update ${name}`, branch, content: Buffer.from(text).toString('base64'), ...(shas[name] ? { sha: shas[name] } : {}) };
+  try {
+    const r = await fetch(`${base}/contents/${DIR}/${name}`, { method: 'PUT', headers: headers({ 'Content-Type': 'application/json' }), body: JSON.stringify(body), signal: sig(20000) });
     if (r.status === 409 || r.status === 422) return { conflict: true };
     if (!r.ok) throw new Error(`HTTP ${r.status} ${(await r.text()).slice(0, 200)}`);
-    const j = await r.json();
-    sha = j.content.sha; etag = null; // الـ etag القديم لم يعد صالحاً
+    shas[name] = (await r.json()).content.sha; etag = null;
     return { ok: true };
   } catch (e) {
-    console.error('[remote-db] push failed:', e.message);
+    console.error(`[remote-db] push ${name} failed:`, e.message);
     return { error: true };
   }
 }
 
-module.exports = { enabled, pull, push, FILE };
+module.exports = { enabled, pull, pullFile, putFile, DIR };
